@@ -184,6 +184,22 @@ def test_feedback(mock_client: langsmith.Client, test_client) -> None:
     )
 
 
+@patch("service.service.LangsmithClient")
+def test_feedback_is_best_effort(mock_client: langsmith.Client, test_client) -> None:
+    ls_instance = mock_client.return_value
+    ls_instance.create_feedback.side_effect = Exception("Invalid token")
+    body = {
+        "run_id": "847c6285-8fc9-4560-a83f-4e6285809254",
+        "key": "human-feedback-stars",
+        "score": 0.8,
+    }
+
+    response = test_client.post("/feedback", json=body)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+
+
 def test_history(test_client, mock_agent) -> None:
     QUESTION = "What is the weather in Tokyo?"
     ANSWER = "The weather in Tokyo is 70 degrees."
@@ -210,6 +226,26 @@ def test_history(test_client, mock_agent) -> None:
     assert output.messages[0].content == QUESTION
     assert output.messages[1].type == "ai"
     assert output.messages[1].content == ANSWER
+
+
+def test_history_returns_empty_messages_for_new_thread(test_client, mock_agent) -> None:
+    mock_agent.aget_state.return_value = StateSnapshot(
+        values={},
+        next=(),
+        config={},
+        metadata=None,
+        created_at=None,
+        parent_config=None,
+        tasks=(),
+        interrupts=(),
+    )
+
+    response = test_client.post(
+        "/history", json={"thread_id": "7bcc7cc1-99d7-4b1d-bdb5-e6f90ed44de6"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"messages": []}
 
 
 @pytest.mark.asyncio
