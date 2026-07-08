@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     COMPATIBLE_MODEL: str | None = None
     COMPATIBLE_API_KEY: SecretStr | None = None
     COMPATIBLE_BASE_URL: str | None = None
+    COMPATIBLE_TEMPERATURE: float = 0.5
 
     OPENWEATHERMAP_API_KEY: SecretStr | None = None
 

@@ -79,7 +79,7 @@ def get_model(model_name: AllModelEnum, /) -> ModelT:
 
         return ChatOpenAI(
             model=settings.COMPATIBLE_MODEL,
-            temperature=0.5,
+            temperature=settings.COMPATIBLE_TEMPERATURE,
             streaming=True,
             openai_api_base=settings.COMPATIBLE_BASE_URL,
             openai_api_key=settings.COMPATIBLE_API_KEY,
