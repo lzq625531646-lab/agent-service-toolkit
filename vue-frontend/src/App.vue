@@ -1,123 +1,131 @@
 <template>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-title">🧰 Agent Service Toolkit</div>
-        <p>Full toolkit for running an AI agent service built with LangGraph, FastAPI and Streamlit</p>
+  <div
+    class="grid min-h-screen grid-cols-1 bg-white text-[#31333f] min-[901px]:grid-cols-[21rem_minmax(0,1fr)]"
+  >
+    <aside class="flex flex-col gap-3.5 bg-slate-100 px-4 py-4 min-[901px]:min-h-screen min-[901px]:pt-24">
+      <div>
+        <div class="mb-6 text-xl font-bold text-slate-800">🧰 Agent Service Toolkit</div>
+        <p class="text-[0.98rem] leading-7 text-slate-600">
+          Full toolkit for running an AI agent service built with LangGraph, FastAPI and Streamlit
+        </p>
       </div>
 
-      <button class="sidebar-button" type="button" @click="newChat">▣ New Chat</button>
+      <button :class="sidebarButtonClass" type="button" @click="newChat">▣ New Chat</button>
 
-      <section class="sidebar-section">
-        <button class="sidebar-button" type="button" @click="settingsOpen = !settingsOpen">
+      <section>
+        <button :class="sidebarButtonClass" type="button" @click="settingsOpen = !settingsOpen">
           ⚙ Settings⌄
         </button>
-        <div v-if="settingsOpen" class="settings-panel">
-          <label>
-            <span>LLM to use</span>
-            <select v-model="selectedModel">
+        <div v-if="settingsOpen" class="mt-2 grid gap-3 rounded-lg border border-slate-300 bg-white p-3">
+          <label :class="fieldClass">
+            <span :class="fieldLabelClass">LLM to use</span>
+            <select v-model="selectedModel" :class="fieldControlClass">
               <option v-for="model in metadata?.models ?? []" :key="model" :value="model">
                 {{ model }}
               </option>
             </select>
           </label>
-          <label>
-            <span>Agent to use</span>
-            <select v-model="selectedAgent">
+          <label :class="fieldClass">
+            <span :class="fieldLabelClass">Agent to use</span>
+            <select v-model="selectedAgent" :class="fieldControlClass">
               <option v-for="agent in metadata?.agents ?? []" :key="agent.key" :value="agent.key">
                 {{ agent.key }}
               </option>
             </select>
           </label>
-          <label class="toggle-row">
-            <input v-model="useStreaming" type="checkbox" />
-            <span>Stream results</span>
+          <label class="flex items-center gap-2">
+            <input v-model="useStreaming" class="size-4 rounded border-slate-300 accent-[#ff4b4b]" type="checkbox" />
+            <span :class="fieldLabelClass">Stream results</span>
           </label>
-          <label>
-            <span>User ID</span>
-            <input :value="userId" disabled />
+          <label :class="fieldClass">
+            <span :class="fieldLabelClass">User ID</span>
+            <input :value="userId" :class="fieldControlClass" disabled />
           </label>
         </div>
       </section>
 
-      <button class="sidebar-button" type="button" @click="architectureOpen = true">
+      <button :class="sidebarButtonClass" type="button" @click="architectureOpen = true">
         ⌘ Architecture
       </button>
-      <button class="sidebar-button" type="button" @click="privacyOpen = !privacyOpen">
+      <button :class="sidebarButtonClass" type="button" @click="privacyOpen = !privacyOpen">
         @ Privacy⌄
       </button>
-      <div v-if="privacyOpen" class="side-note">
+      <div v-if="privacyOpen" class="rounded-lg bg-white/70 px-3 py-2 text-[0.98rem] leading-7 text-slate-600">
         Prompts, responses and feedback can be recorded by the service for evaluation when tracing is
         enabled.
       </div>
-      <button class="sidebar-button" type="button" @click="shareOpen = true">↥ Share/resume chat</button>
+      <button :class="sidebarButtonClass" type="button" @click="shareOpen = true">↥ Share/resume chat</button>
 
-      <a class="source-link" href="https://github.com/JoshuaC215/agent-service-toolkit" target="_blank">
+      <a
+        class="mt-auto text-sm font-semibold text-sky-700 underline-offset-4 hover:underline"
+        href="https://github.com/JoshuaC215/agent-service-toolkit"
+        target="_blank"
+      >
         View the source code
       </a>
-      <p class="made-with">Made with ♡ by Joshua in Oakland</p>
+      <p class="m-0 text-sm text-slate-500">Made with ♡ by Joshua in Oakland</p>
     </aside>
 
-    <main class="chat-page">
-      <div v-if="error" class="error-card">
+    <main class="relative flex min-w-0 flex-col items-center px-4 pb-28 pt-8 min-[901px]:px-8 min-[901px]:pb-[7.5rem] min-[901px]:pt-[6.8rem]">
+      <div v-if="error" class="mb-5 w-full max-w-[820px] rounded-lg bg-red-50 px-4 py-4 font-semibold text-red-600">
         {{ error }}
       </div>
 
-      <div class="chat-list">
-        <div v-if="messages.length === 0" class="message-row ai">
-          <div class="avatar ai-avatar">🤖</div>
-          <div class="message-content">{{ welcomeMessage }}</div>
+      <div class="w-full max-w-[820px]">
+        <div v-if="messages.length === 0" class="mb-6 grid grid-cols-[42px_minmax(0,1fr)] gap-3">
+          <div :class="avatarClasses('ai')">🤖</div>
+          <div :class="messageContentClasses('ai')">{{ welcomeMessage }}</div>
         </div>
 
         <template v-for="item in renderItems" :key="item.id">
-          <div v-if="item.kind === 'message'" class="message-row" :class="item.message.type">
-            <div class="avatar" :class="`${item.message.type}-avatar`">
+          <div v-if="item.kind === 'message'" class="mb-6 grid grid-cols-[42px_minmax(0,1fr)] gap-3">
+            <div :class="avatarClasses(item.message.type)">
               {{ avatarFor(item.message.type) }}
             </div>
-            <div class="message-stack">
-              <div v-if="item.message.content" class="message-content">
+            <div class="grid min-w-0 gap-3">
+              <div v-if="item.message.content" :class="messageContentClasses(item.message.type)">
                 {{ item.message.content }}
               </div>
-              <div v-if="item.message.tool_calls.length" class="tool-list">
+              <div v-if="item.message.tool_calls.length" class="grid gap-2.5">
                 <details
                   v-for="toolCall in item.message.tool_calls"
                   :key="toolCall.id ?? toolCall.name"
-                  class="tool-card"
+                  class="overflow-hidden rounded-lg border border-slate-300 bg-white"
                   open
                 >
-                  <summary>
+                  <summary class="cursor-pointer px-3.5 py-3 font-bold text-slate-800">
                     {{ toolCall.name.includes("transfer_to") ? "💼 Sub Agent" : "🛠️ Tool Call" }}:
                     {{ toolCall.name }}
                   </summary>
-                  <pre>Input:
+                  <pre :class="preClass">Input:
 {{ formatJson(toolCall.args) }}</pre>
-                  <pre v-if="toolResults[toolCall.id ?? '']">Output:
+                  <pre v-if="toolResults[toolCall.id ?? '']" :class="preClass">Output:
 {{ toolResults[toolCall.id ?? ""] }}</pre>
                 </details>
               </div>
             </div>
           </div>
 
-          <div v-else class="message-row task">
-            <div class="avatar task-avatar">🏭</div>
-            <div class="task-card">
-              <div class="task-title">{{ taskLabel(item.task) }}</div>
-              <pre>{{ formatJson(item.task.data) }}</pre>
+          <div v-else class="mb-6 grid grid-cols-[42px_minmax(0,1fr)] gap-3">
+            <div :class="avatarClasses('task')">🏭</div>
+            <div class="overflow-hidden rounded-lg border border-slate-300 bg-white">
+              <div class="px-3.5 py-3 font-bold text-slate-800">{{ taskLabel(item.task) }}</div>
+              <pre :class="preClass">{{ formatJson(item.task.data) }}</pre>
             </div>
           </div>
         </template>
 
-        <div v-if="streamingText" class="message-row ai">
-          <div class="avatar ai-avatar">🤖</div>
-          <div class="message-content">{{ streamingText }}</div>
+        <div v-if="streamingText" class="mb-6 grid grid-cols-[42px_minmax(0,1fr)] gap-3">
+          <div :class="avatarClasses('ai')">🤖</div>
+          <div :class="messageContentClasses('ai')">{{ streamingText }}</div>
         </div>
 
-        <div v-if="latestAiRunId" class="feedback-row">
+        <div v-if="latestAiRunId" class="ml-[54px] flex items-center gap-1.5 text-sm text-slate-500">
           <button
             v-for="star in 5"
             :key="star"
-            class="star-button"
-            :class="{ active: selectedFeedback >= star }"
+            class="border-0 bg-transparent text-xl transition"
+            :class="selectedFeedback >= star ? 'text-amber-500' : 'text-slate-400 hover:text-amber-500'"
             type="button"
             @click="recordFeedback(star)"
           >
@@ -127,31 +135,41 @@
         </div>
       </div>
 
-      <form class="chat-input" @submit.prevent="submitMessage">
+      <form
+        class="fixed bottom-[1.6rem] left-4 right-4 mx-auto grid max-w-[820px] grid-cols-[minmax(0,1fr)_auto] gap-2.5 rounded-xl border border-slate-300 bg-white p-2.5 shadow-[0_12px_32px_rgba(31,41,55,0.1)] min-[901px]:left-[calc(21rem+2rem)] min-[901px]:right-8"
+        @submit.prevent="submitMessage"
+      >
         <input
           v-model.trim="draft"
           :disabled="loading || !metadata"
+          class="min-h-[42px] min-w-0 border-0 px-2 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
           autocomplete="off"
           placeholder="Ask anything"
         />
-        <button type="submit" :disabled="loading || !draft || !metadata">Send</button>
+        <button
+          class="min-h-[42px] min-w-[76px] rounded-lg bg-[#ff4b4b] px-4 font-bold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+          type="submit"
+          :disabled="loading || !draft || !metadata"
+        >
+          Send
+        </button>
       </form>
     </main>
 
-    <div v-if="architectureOpen" class="modal-backdrop" @click.self="architectureOpen = false">
-      <div class="modal architecture-modal">
-        <button class="modal-close" type="button" @click="architectureOpen = false">×</button>
-        <h2>Architecture</h2>
-        <img src="/agent_architecture.png" alt="Agent architecture" />
+    <div v-if="architectureOpen" class="fixed inset-0 z-50 grid place-items-center bg-slate-900/35 p-6" @click.self="architectureOpen = false">
+      <div :class="modalClass">
+        <button :class="modalCloseClass" type="button" aria-label="Close architecture modal" @click="architectureOpen = false">×</button>
+        <h2 class="mb-4 text-2xl font-bold text-slate-900">Architecture</h2>
+        <img class="w-full rounded-lg border border-slate-300" src="/agent_architecture.png" alt="Agent architecture" />
       </div>
     </div>
 
-    <div v-if="shareOpen" class="modal-backdrop" @click.self="shareOpen = false">
-      <div class="modal">
-        <button class="modal-close" type="button" @click="shareOpen = false">×</button>
-        <h2>Share/resume chat</h2>
-        <p>Chat URL:</p>
-        <pre>{{ shareUrl }}</pre>
+    <div v-if="shareOpen" class="fixed inset-0 z-50 grid place-items-center bg-slate-900/35 p-6" @click.self="shareOpen = false">
+      <div :class="modalClass">
+        <button :class="modalCloseClass" type="button" aria-label="Close share modal" @click="shareOpen = false">×</button>
+        <h2 class="mb-4 text-2xl font-bold text-slate-900">Share/resume chat</h2>
+        <p class="mb-2 text-slate-700">Chat URL:</p>
+        <pre class="overflow-auto rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm leading-6 text-slate-700">{{ shareUrl }}</pre>
       </div>
     </div>
   </div>
@@ -187,6 +205,19 @@ const feedbackStatus = ref("");
 
 const userId = getOrCreateQueryParam("user_id");
 const threadId = ref(getOrCreateQueryParam("thread_id"));
+
+const sidebarButtonClass =
+  "min-h-[46px] w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60";
+const fieldClass = "grid gap-1.5";
+const fieldLabelClass = "text-[0.82rem] font-semibold text-slate-500";
+const fieldControlClass =
+  "min-h-[38px] w-full rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500";
+const preClass =
+  "m-0 overflow-auto border-t border-slate-300 bg-slate-50 px-3.5 py-3 text-[0.85rem] leading-6 text-slate-700";
+const modalClass =
+  "relative max-h-[88vh] w-full max-w-[720px] overflow-auto rounded-lg bg-white p-6 shadow-[0_24px_80px_rgba(17,24,39,0.2)]";
+const modalCloseClass =
+  "absolute right-3 top-3 grid size-[34px] place-items-center rounded-full border-0 bg-slate-100 text-2xl leading-none text-slate-700 transition hover:bg-slate-200";
 
 const latestAiRunId = computed(() => {
   const latest = [...messages.value].reverse().find((message) => message.type === "ai" && message.run_id);
@@ -384,6 +415,25 @@ function avatarFor(type: ChatMessageType): string {
   if (type === "ai") return "🤖";
   if (type === "tool") return "🛠️";
   return "🏭";
+}
+
+function avatarClasses(type: ChatMessageType | "task"): string {
+  const colors: Record<ChatMessageType | "task", string> = {
+    human: "bg-[#ff4b4b]",
+    ai: "bg-amber-400",
+    tool: "bg-slate-500",
+    custom: "bg-slate-600",
+    task: "bg-slate-600"
+  };
+  return `grid size-[34px] place-items-center rounded-lg text-base text-white ${colors[type]}`;
+}
+
+function messageContentClasses(type: ChatMessageType): string {
+  const contentStyle =
+    type === "human"
+      ? "bg-slate-50 px-4 py-3 text-slate-800"
+      : "bg-transparent py-3 pr-4 text-slate-800";
+  return `min-h-12 w-full whitespace-pre-wrap rounded-lg leading-7 ${contentStyle}`;
 }
 
 function formatJson(value: unknown): string {
