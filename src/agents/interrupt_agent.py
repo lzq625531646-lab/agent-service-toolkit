@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -25,6 +26,20 @@ class AgentState(MessagesState, total=False):
     """
 
     birthdate: datetime | None
+    user_request: str
+
+
+def _latest_human_message(messages: Sequence[BaseMessage]) -> str:
+    """Return the most recent human message as plain text."""
+    for message in reversed(messages):
+        if not isinstance(message, HumanMessage):
+            continue
+        if isinstance(message.content, str):
+            return message.content
+        return "".join(
+            item if isinstance(item, str) else str(item.get("text", "")) for item in message.content
+        )
+    return ""
 
 
 def wrap_model(
@@ -47,11 +62,15 @@ Don't tell the user what their sign is, you are just demonstrating your knowledg
 async def background(state: AgentState, config: RunnableConfig) -> AgentState:
     """This node is to demonstrate doing work before the interrupt"""
 
+    user_request = _latest_human_message(state["messages"])
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     model_runnable = wrap_model(m, background_prompt.format())
     response = await model_runnable.ainvoke(state, config)
 
-    return {"messages": [AIMessage(content=response.content)]}
+    return {
+        "messages": [AIMessage(content=response.content)],
+        "user_request": user_request,
+    }
 
 
 birthdate_extraction_prompt = SystemMessagePromptTemplate.from_template("""
@@ -129,8 +148,7 @@ async def determine_birthdate(
     # If birthdate wasn't retrieved from store, proceed with extraction
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     model_runnable = wrap_model(
-        m.with_structured_output(BirthdateExtraction),
-        birthdate_extraction_prompt.format()
+        m.with_structured_output(BirthdateExtraction), birthdate_extraction_prompt.format()
     ).with_config(tags=["skip_stream"])
     response: BirthdateExtraction = await model_runnable.ainvoke(state, config)
 
@@ -191,10 +209,7 @@ Otherwise, respond conversationally based on their message.
 async def generate_response(state: AgentState, config: RunnableConfig) -> AgentState:
     """Generates the final response based on the user's query and the available birthdate."""
     birthdate = state.get("birthdate")
-    if state.get("messages") and isinstance(state["messages"][-1], HumanMessage):
-        last_user_message = state["messages"][-1].content
-    else:
-        last_user_message = ""
+    user_request = state.get("user_request") or _latest_human_message(state.get("messages", []))
 
     if not birthdate:
         # This should ideally not be reached if determine_birthdate worked correctly and possibly interrupted.
@@ -210,22 +225,39 @@ async def generate_response(state: AgentState, config: RunnableConfig) -> AgentS
     birthdate_str = birthdate.strftime("%B %d, %Y")  # Format for display
 
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
-    model_runnable = wrap_model(
-        m, response_prompt.format(birthdate_str=birthdate_str, last_user_message=last_user_message)
+    system_prompt = response_prompt.format(
+        birthdate_str=birthdate_str,
+        last_user_message=user_request,
     )
-    response = await model_runnable.ainvoke(state, config)
+    # Do not pass the background AIMessage as the final conversational turn. Some
+    # OpenAI-compatible providers treat an assistant-terminated history as already
+    # answered and return an empty completion.
+    response = await m.ainvoke(
+        [system_prompt, HumanMessage(content=user_request)],
+        config,
+    )
+
+    if not response.content:
+        logger.error(
+            "[generate_response] Model returned empty content for user request: %r",
+            user_request,
+        )
+        return {
+            "messages": [AIMessage(content="I couldn't generate a response. Please try again.")]
+        }
 
     return {"messages": [AIMessage(content=response.content)]}
 
 
 # Define the graph
 agent = StateGraph(AgentState)
-agent.add_node("background", background)
+# agent.add_node("background", background)
 agent.add_node("determine_birthdate", determine_birthdate)
 agent.add_node("generate_response", generate_response)
 
-agent.set_entry_point("background")
-agent.add_edge("background", "determine_birthdate")
+agent.set_entry_point("determine_birthdate")
+
+# agent.add_edge("background", "determine_birthdate")
 agent.add_edge("determine_birthdate", "generate_response")
 agent.add_edge("generate_response", END)
 
