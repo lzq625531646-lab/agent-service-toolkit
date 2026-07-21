@@ -4,10 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
+from auth import user_store
 from core import settings
 from core.observability import get_langfuse_client
 from rag import rag_store
 from service import app
+from service.auth import AuthContext, get_auth_context
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +26,21 @@ def disable_live_rag_store_for_unit_tests(monkeypatch):
     monkeypatch.setattr(rag_store, "close", AsyncMock())
     yield
     get_langfuse_client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def disable_live_user_store_for_unit_tests(monkeypatch):
+    """Unit tests must not open the developer's PostgreSQL user database."""
+    monkeypatch.setattr(user_store, "open", AsyncMock())
+    monkeypatch.setattr(user_store, "close", AsyncMock())
+
+
+@pytest.fixture(autouse=True)
+def use_service_auth_for_existing_endpoint_tests():
+    """Existing service tests exercise machine-client compatibility via service auth."""
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(service_access=True)
+    yield
+    app.dependency_overrides.pop(get_auth_context, None)
 
 
 @pytest.fixture

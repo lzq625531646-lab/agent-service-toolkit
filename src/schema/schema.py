@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal, NotRequired
 from uuid import UUID
 
-from pydantic import BaseModel, Field, SerializeAsAny
+from pydantic import BaseModel, EmailStr, Field, SerializeAsAny
 from typing_extensions import TypedDict
 
 from schema.models import AllModelEnum, AnthropicModelName, OpenAIModelName
@@ -175,6 +175,40 @@ class ChatHistoryInput(BaseModel):
 
 class ChatHistory(BaseModel):
     messages: list[ChatMessage]
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    display_name: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserProfile(BaseModel):
+    id: UUID
+    email: EmailStr
+    display_name: str
+    created_at: datetime
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_at: datetime
+    user: UserProfile
+
+
+class Conversation(BaseModel):
+    thread_id: str
+    title: str
+    agent_id: str
+    model: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class RagDocument(BaseModel):

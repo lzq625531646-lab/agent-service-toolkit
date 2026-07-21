@@ -54,6 +54,7 @@ docker compose watch
 
 1. **LangGraph Agent and latest features**: A customizable agent built using the LangGraph framework. Implements the latest LangGraph v1.0 features including human in the loop with `interrupt()`, flow control with `Command`, long-term memory with `Store`, and `langgraph-supervisor`.
 1. **FastAPI Service**: Serves the agent with both streaming and non-streaming endpoints.
+1. **User accounts and private chat history**: PostgreSQL-backed registration, Argon2 password hashing, revocable login sessions, per-user conversation ownership, and a Vue history sidebar for resuming any saved thread - see [docs](docs/User_Accounts.md).
 1. **Advanced Streaming**: A novel approach to support both token-based and message-based streaming.
 1. **AG-UI Protocol Support**: Every agent is also served over the [AG-UI protocol](https://docs.ag-ui.com) for connecting AG-UI compatible frontends like CopilotKit - see [docs](docs/AGUI.md).
 1. **Streamlit Interface**: Provides a user-friendly chat interface for interacting with the agent, including voice input and output.
@@ -96,6 +97,7 @@ The repository is structured as follows:
 - [Setting up Ollama](docs/Ollama.md)
 - [Setting up VertexAI](docs/VertexAI.md)
 - [Setting up RAG with PostgreSQL pgvector](docs/RAG_Assistant.md)
+- [User accounts and resumable chat history](docs/User_Accounts.md)
 
 ### Building or customizing your own agent
 

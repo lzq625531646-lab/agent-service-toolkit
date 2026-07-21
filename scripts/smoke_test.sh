@@ -42,6 +42,8 @@ export SMOKE_THREAD_ID
 SMOKE_SERVICE_PORT="${SMOKE_SERVICE_PORT:-8080}"
 SMOKE_SERVICE_URL="http://localhost:${SMOKE_SERVICE_PORT}"
 export SMOKE_SERVICE_URL
+AUTH_SECRET="${SMOKE_AUTH_SECRET:-smoke-only-service-secret}"
+export AUTH_SECRET
 # Database smoke containers always use their own Compose project. This prevents
 # the cleanup trap's `down -v` from ever deleting a developer's persistent data.
 SMOKE_COMPOSE_PROJECT_NAME="${SMOKE_COMPOSE_PROJECT_NAME:-agent-service-toolkit-smoke-$$}"
@@ -189,6 +191,15 @@ print('  wrote long-term Store record')
     echo "  ✓ verified: pgvector RAG tables initialized"
   else
     echo "  ✗ FAIL: expected both pgvector RAG tables, got '$n'"
+    return 1
+  fi
+  n="$(docker exec -e PGPASSWORD="$postgres_password" "$cid" \
+    psql -U "$postgres_user" -d "$postgres_db" -tAc \
+    "select count(*) from pg_tables where schemaname='public' and tablename in ('app_users','user_sessions','chat_sessions')" 2>/dev/null | tr -d '[:space:]')" || true
+  if [[ "$n" == "3" ]]; then
+    echo "  ✓ verified: user account and conversation tables initialized"
+  else
+    echo "  ✗ FAIL: expected all user account and conversation tables, got '$n'"
     return 1
   fi
 

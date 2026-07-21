@@ -176,11 +176,20 @@ def test_agui_interrupt_and_resume(mock_agui_agent, test_client) -> None:
     assert "Your favorite color is blue" in contents
 
 
-def test_agui_auth(mock_settings, mock_agui_agent, test_client) -> None:
+def test_agui_auth(monkeypatch, mock_agui_agent, test_client) -> None:
     """The AG-UI endpoints enforce the same bearer auth as the rest of the service."""
+    from unittest.mock import AsyncMock
+
     from pydantic import SecretStr
 
-    mock_settings.AUTH_SECRET = SecretStr("test-secret")
+    from auth import user_store
+    from core import settings
+    from service import app
+    from service.auth import get_auth_context
+
+    app.dependency_overrides.pop(get_auth_context, None)
+    monkeypatch.setattr(settings, "AUTH_SECRET", SecretStr("test-secret"))
+    monkeypatch.setattr(user_store, "get_user_by_session_token", AsyncMock(return_value=None))
     response = test_client.post("/agui/model-agent/run", json=run_input())
     assert response.status_code == 401
 

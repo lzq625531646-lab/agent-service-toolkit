@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: LogLevel = LogLevel.WARNING
 
     AUTH_SECRET: SecretStr | None = None
+    USER_SESSION_DAYS: int = 30
 
     OPENAI_API_KEY: SecretStr | None = None
     DEEPSEEK_API_KEY: SecretStr | None = None

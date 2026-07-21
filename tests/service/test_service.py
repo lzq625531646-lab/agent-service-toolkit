@@ -1,13 +1,41 @@
 import json
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Interrupt, StateSnapshot
 
 from agents.agents import Agent
+from auth import ConversationRecord, UserRecord, user_store
 from schema import ChatHistory, ChatMessage, ServiceMetadata
 from schema.models import OpenAIModelName
+from service import app
+from service.auth import get_current_user
+
+
+def authenticated_history_user() -> UserRecord:
+    return UserRecord(
+        id=uuid4(),
+        email="history@example.com",
+        display_name="History User",
+        password_hash="unused",
+        created_at=datetime.now(UTC),
+    )
+
+
+def conversation_for(user: UserRecord, thread_id: str) -> ConversationRecord:
+    now = datetime.now(UTC)
+    return ConversationRecord(
+        thread_id=thread_id,
+        user_id=user.id,
+        title="Weather",
+        agent_id="research-assistant",
+        model="fake",
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def test_invoke(test_client, mock_agent) -> None:
@@ -177,9 +205,7 @@ def test_feedback(mock_get_langfuse_client: MagicMock, test_client) -> None:
     response = test_client.post("/feedback", json=body)
     assert response.status_code == 200
     assert response.json() == {"status": "success"}
-    langfuse.create_trace_id.assert_called_once_with(
-        seed="847c6285-8fc9-4560-a83f-4e6285809254"
-    )
+    langfuse.create_trace_id.assert_called_once_with(seed="847c6285-8fc9-4560-a83f-4e6285809254")
     langfuse.create_score.assert_called_once_with(
         trace_id="langfuse-trace-id",
         name="human-feedback-stars",
@@ -223,9 +249,16 @@ def test_history(test_client, mock_agent) -> None:
         interrupts=(),
     )
 
-    response = test_client.post(
-        "/history", json={"thread_id": "7bcc7cc1-99d7-4b1d-bdb5-e6f90ed44de6"}
-    )
+    thread_id = "7bcc7cc1-99d7-4b1d-bdb5-e6f90ed44de6"
+    user = authenticated_history_user()
+    app.dependency_overrides[get_current_user] = lambda: user
+    with patch.object(
+        user_store,
+        "get_conversation",
+        AsyncMock(return_value=conversation_for(user, thread_id)),
+    ):
+        response = test_client.post("/history", json={"thread_id": thread_id})
+    app.dependency_overrides.pop(get_current_user, None)
     assert response.status_code == 200
 
     output = ChatHistory.model_validate(response.json())
@@ -247,9 +280,16 @@ def test_history_returns_empty_messages_for_new_thread(test_client, mock_agent) 
         interrupts=(),
     )
 
-    response = test_client.post(
-        "/history", json={"thread_id": "7bcc7cc1-99d7-4b1d-bdb5-e6f90ed44de6"}
-    )
+    thread_id = "7bcc7cc1-99d7-4b1d-bdb5-e6f90ed44de6"
+    user = authenticated_history_user()
+    app.dependency_overrides[get_current_user] = lambda: user
+    with patch.object(
+        user_store,
+        "get_conversation",
+        AsyncMock(return_value=conversation_for(user, thread_id)),
+    ):
+        response = test_client.post("/history", json={"thread_id": thread_id})
+    app.dependency_overrides.pop(get_current_user, None)
 
     assert response.status_code == 200
     assert response.json() == {"messages": []}

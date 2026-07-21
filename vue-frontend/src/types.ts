@@ -50,6 +50,29 @@ export interface ChatHistory {
   messages: ChatMessage[];
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  display_name: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_at: string;
+  user: UserProfile;
+}
+
+export interface Conversation {
+  thread_id: string;
+  title: string;
+  agent_id: string;
+  model: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TaskData {
   name?: string | null;
   run_id: string;

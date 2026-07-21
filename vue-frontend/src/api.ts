@@ -1,16 +1,68 @@
 import type {
+  AuthResponse,
   ChatHistory,
   ChatMessage,
+  Conversation,
   FeedbackPayload,
   RagDocument,
   ServiceMetadata,
-  StreamEvent
+  StreamEvent,
+  UserProfile
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const TOKEN_STORAGE_KEY = "agent-service-access-token";
+
+export function getAccessToken(): string {
+  return localStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
+}
+
+export function setAccessToken(token: string): void {
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+export function clearAccessToken(): void {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+export async function registerUser(payload: {
+  email: string;
+  displayName: string;
+  password: string;
+}): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/register", {
+    method: "POST",
+    headers: jsonHeaders(false),
+    body: JSON.stringify({
+      email: payload.email,
+      display_name: payload.displayName,
+      password: payload.password
+    })
+  });
+}
+
+export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/login", {
+    method: "POST",
+    headers: jsonHeaders(false),
+    body: JSON.stringify({ email, password })
+  });
+}
+
+export async function getCurrentUser(): Promise<UserProfile> {
+  return request<UserProfile>("/auth/me", { headers: authHeaders() });
+}
+
+export async function logoutUser(): Promise<void> {
+  await request<void>("/auth/logout", { method: "POST", headers: authHeaders() });
+}
+
+export async function listConversations(): Promise<Conversation[]> {
+  return request<Conversation[]>("/conversations", { headers: authHeaders() });
+}
 
 export async function getInfo(): Promise<ServiceMetadata> {
-  const response = await fetch(`${API_BASE_URL}/info`);
+  const response = await fetch(`${API_BASE_URL}/info`, { headers: authHeaders() });
   if (!response.ok) {
     throw new Error(`Failed to load service info: ${response.status}`);
   }
@@ -18,10 +70,8 @@ export async function getInfo(): Promise<ServiceMetadata> {
 }
 
 export async function getHistory(threadId: string): Promise<ChatHistory> {
-  const response = await fetch(`${API_BASE_URL}/history`, {
-    method: "POST",
-    headers: jsonHeaders(),
-    body: JSON.stringify({ thread_id: threadId })
+  const response = await fetch(`${API_BASE_URL}/conversations/${encodeURIComponent(threadId)}/messages`, {
+    headers: authHeaders()
   });
   if (!response.ok) {
     throw new Error(`Failed to load chat history: ${response.status}`);
@@ -34,7 +84,6 @@ export async function invokeAgent(payload: {
   message: string;
   model: string;
   threadId: string;
-  userId: string;
 }): Promise<ChatMessage> {
   const response = await fetch(`${API_BASE_URL}/${encodeURIComponent(payload.agent)}/invoke`, {
     method: "POST",
@@ -42,8 +91,7 @@ export async function invokeAgent(payload: {
     body: JSON.stringify({
       message: payload.message,
       model: payload.model,
-      thread_id: payload.threadId,
-      user_id: payload.userId
+      thread_id: payload.threadId
     })
   });
   if (!response.ok) {
@@ -58,7 +106,6 @@ export async function streamAgent(
     message: string;
     model: string;
     threadId: string;
-    userId: string;
     streamTokens: boolean;
   },
   onEvent: (event: StreamEvent) => void
@@ -70,7 +117,6 @@ export async function streamAgent(
       message: payload.message,
       model: payload.model,
       thread_id: payload.threadId,
-      user_id: payload.userId,
       stream_tokens: payload.streamTokens
     })
   });
@@ -115,7 +161,8 @@ export async function sendFeedback(payload: FeedbackPayload): Promise<void> {
 }
 
 export async function listRagDocuments(): Promise<RagDocument[]> {
-  const response = await fetch(`${API_BASE_URL}/rag/documents`);
+  const response = await fetch(`${API_BASE_URL}/rag/documents`, { headers: authHeaders() });
+
   if (!response.ok) {
     throw new Error(`Failed to load RAG documents: ${response.status}`);
   }
@@ -127,6 +174,7 @@ export async function uploadRagDocument(file: File): Promise<RagDocument> {
   body.append("file", file);
   const response = await fetch(`${API_BASE_URL}/rag/documents`, {
     method: "POST",
+    headers: authHeaders(),
     body
   });
   if (!response.ok) {
@@ -138,7 +186,8 @@ export async function uploadRagDocument(file: File): Promise<RagDocument> {
 
 export async function deleteRagDocument(documentId: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/rag/documents/${encodeURIComponent(documentId)}`, {
-    method: "DELETE"
+    method: "DELETE",
+    headers: authHeaders()
   });
   if (!response.ok) {
     throw new Error(`Document deletion failed: ${response.status}`);
@@ -161,8 +210,26 @@ function parseSseEvent(rawEvent: string): StreamEvent | "done" | null {
   return JSON.parse(data) as StreamEvent;
 }
 
-function jsonHeaders(): HeadersInit {
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail || `Request failed: ${response.status}`);
+  }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
+
+function authHeaders(): HeadersInit {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function jsonHeaders(includeAuth = true): HeadersInit {
   return {
+    ...(includeAuth ? authHeaders() : {}),
     "Content-Type": "application/json"
   };
 }

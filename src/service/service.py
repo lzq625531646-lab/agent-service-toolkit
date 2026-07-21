@@ -4,6 +4,7 @@ import logging
 import warnings
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -11,7 +12,6 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from langchain_core._api import LangChainBetaWarning
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -19,6 +19,7 @@ from langgraph.types import Command, Interrupt
 from langsmith import uuid7
 
 from agents import DEFAULT_AGENT, AgentGraph, get_agent, get_all_agent_info, load_agent
+from auth import ConversationAccessError, ConversationRecord, UserRecord, user_store
 from core import settings
 from core.observability import (
     flush_langfuse,
@@ -26,12 +27,14 @@ from core.observability import (
     get_langfuse_handler,
     observe_agent_run,
 )
+from core.settings import DatabaseType
 from memory import initialize_database, initialize_store
 from rag import rag_store
 from schema import (
     ChatHistory,
     ChatHistoryInput,
     ChatMessage,
+    Conversation,
     Feedback,
     FeedbackResponse,
     ServiceMetadata,
@@ -39,6 +42,8 @@ from schema import (
     UserInput,
 )
 from service.agui import router as agui_router
+from service.auth import AuthContext, get_auth_context, get_current_user
+from service.auth import router as auth_router
 from service.rag import router as rag_router
 from service.utils import (
     convert_message_content_to_string,
@@ -55,19 +60,6 @@ def custom_generate_unique_id(route: APIRoute) -> str:
     return route.name
 
 
-def verify_bearer(
-    http_auth: Annotated[
-        HTTPAuthorizationCredentials | None,
-        Depends(HTTPBearer(description="Please provide AUTH_SECRET api key.", auto_error=False)),
-    ],
-) -> None:
-    if not settings.AUTH_SECRET:
-        return
-    auth_secret = settings.AUTH_SECRET.get_secret_value()
-    if not http_auth or http_auth.credentials != auth_secret:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
@@ -77,6 +69,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         # Initialize both checkpointer (for short-term memory) and store (for long-term memory)
         async with initialize_database() as saver, initialize_store() as store:
+            user_store_open = settings.DATABASE_TYPE == DatabaseType.POSTGRES
+            if user_store_open:
+                await user_store.open()
+            else:
+                logger.warning(
+                    "User registration and conversation indexing require DATABASE_TYPE=postgres; "
+                    "only AUTH_SECRET service access is available with this database backend."
+                )
             await rag_store.open()
             try:
                 # Set up both components
@@ -87,9 +87,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await store.setup()
 
                 if not settings.AUTH_SECRET:
-                    logger.warning(
-                        "AUTH_SECRET is not configured — all API endpoints are unauthenticated. "
-                        "Set AUTH_SECRET in your environment to enable bearer token authentication."
+                    logger.info(
+                        "AUTH_SECRET is not configured; browser users must authenticate with "
+                        "an account session and service-to-service secret access is disabled."
                     )
 
                 # Configure agents with both memory components and async loading
@@ -110,6 +110,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 yield
             finally:
                 await rag_store.close()
+                if user_store_open:
+                    await user_store.close()
                 flush_langfuse()
     except Exception as e:
         logger.exception("Error during database/store/agents initialization: %s", e)
@@ -134,7 +136,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-router = APIRouter(dependencies=[Depends(verify_bearer)])
+app.include_router(auth_router)
+router = APIRouter(dependencies=[Depends(get_auth_context)])
 # AG-UI protocol endpoints inherit the same bearer auth - see service/agui.py
 router.include_router(agui_router)
 router.include_router(rag_router)
@@ -212,9 +215,43 @@ async def _handle_input(
     return kwargs, run_id
 
 
+def _conversation_title(message: str) -> str:
+    compact = " ".join(message.split())
+    return compact[:80] or "New conversation"
+
+
+async def _prepare_conversation(
+    *,
+    auth: AuthContext,
+    user_input: UserInput,
+    agent_id: str,
+    thread_id: str,
+    model: str,
+) -> str:
+    if auth.user is None:
+        return user_input.user_id or str(uuid4())
+    try:
+        await user_store.ensure_conversation(
+            thread_id=thread_id,
+            user_id=auth.user.id,
+            title=_conversation_title(user_input.message),
+            agent_id=agent_id,
+            model=model,
+        )
+    except ConversationAccessError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        ) from exc
+    return str(auth.user.id)
+
+
 @router.post("/{agent_id}/invoke", operation_id="invoke_with_agent_id")
 @router.post("/invoke")
-async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMessage:
+async def invoke(
+    user_input: UserInput,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    agent_id: str = DEFAULT_AGENT,
+) -> ChatMessage:
     """
     Invoke an agent with user input to retrieve a final response.
 
@@ -231,8 +268,14 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
     agent: AgentGraph = get_agent(agent_id)
     run_id = uuid7()
     thread_id = user_input.thread_id or str(uuid4())
-    user_id = user_input.user_id or str(uuid4())
     model = str(user_input.model or settings.DEFAULT_MODEL)
+    user_id = await _prepare_conversation(
+        auth=auth,
+        user_input=user_input,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        model=model,
+    )
     with observe_agent_run(
         agent_id=agent_id,
         protocol="invoke",
@@ -265,6 +308,8 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
                     output=output.model_dump(mode="json"),
                     metadata={"response_type": response_type},
                 )
+            if auth.user is not None:
+                await user_store.touch_conversation(auth.user.id, thread_id)
             return output
         except HTTPException as e:
             if observation is not None:
@@ -278,7 +323,12 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
 
 
 async def message_generator(
-    user_input: StreamInput, agent_id: str = DEFAULT_AGENT
+    user_input: StreamInput,
+    agent_id: str = DEFAULT_AGENT,
+    *,
+    thread_id: str | None = None,
+    user_id: str | None = None,
+    authenticated_user_id: UUID | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Generate a stream of messages from the agent.
@@ -287,8 +337,8 @@ async def message_generator(
     """
     agent: AgentGraph = get_agent(agent_id)
     run_id = uuid7()
-    thread_id = user_input.thread_id or str(uuid4())
-    user_id = user_input.user_id or str(uuid4())
+    thread_id = thread_id or user_input.thread_id or str(uuid4())
+    user_id = user_id or user_input.user_id or str(uuid4())
     model = str(user_input.model or settings.DEFAULT_MODEL)
     with observe_agent_run(
         agent_id=agent_id,
@@ -415,6 +465,11 @@ async def message_generator(
             logger.exception("Message generator failed for agent %s: %s", agent_id, e)
             yield f"data: {json.dumps({'type': 'error', 'content': 'Internal server error'})}\n\n"
         finally:
+            if authenticated_user_id is not None:
+                try:
+                    await user_store.touch_conversation(authenticated_user_id, thread_id)
+                except Exception as e:
+                    logger.warning("Failed to update conversation activity: %s", e, exc_info=True)
             yield "data: [DONE]\n\n"
 
 
@@ -446,7 +501,11 @@ def _sse_response_example() -> dict[int | str, Any]:
     operation_id="stream_with_agent_id",
 )
 @router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
-async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> StreamingResponse:
+async def stream(
+    user_input: StreamInput,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    agent_id: str = DEFAULT_AGENT,
+) -> StreamingResponse:
     """
     Stream an agent's response to a user input, including intermediate messages and tokens.
 
@@ -457,8 +516,23 @@ async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> Stre
 
     Set `stream_tokens=false` to return intermediate messages but not token-by-token.
     """
+    thread_id = user_input.thread_id or str(uuid4())
+    model = str(user_input.model or settings.DEFAULT_MODEL)
+    user_id = await _prepare_conversation(
+        auth=auth,
+        user_input=user_input,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        model=model,
+    )
     return StreamingResponse(
-        message_generator(user_input, agent_id),
+        message_generator(
+            user_input,
+            agent_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            authenticated_user_id=auth.user.id if auth.user else None,
+        ),
         media_type="text/event-stream",
     )
 
@@ -490,23 +564,77 @@ async def feedback(feedback: Feedback) -> FeedbackResponse:
     return FeedbackResponse()
 
 
+async def _conversation_history(conversation: ConversationRecord) -> ChatHistory:
+    agent: AgentGraph = get_agent(conversation.agent_id)
+    config = RunnableConfig(configurable={"thread_id": conversation.thread_id})
+    channels = getattr(agent, "channels", {})
+    checkpointer: Any = agent.checkpointer
+    if isinstance(channels, dict) and "__previous__" in channels and checkpointer:
+        checkpoint_tuple = await checkpointer.aget_tuple(config)
+        previous = (
+            checkpoint_tuple.checkpoint["channel_values"].get("__previous__", {})
+            if checkpoint_tuple
+            else {}
+        )
+        messages: list[AnyMessage] = previous.get("messages", [])
+    else:
+        state_snapshot = await agent.aget_state(config=config)
+        messages = state_snapshot.values.get("messages", [])
+    return ChatHistory(messages=[langchain_to_chat_message(message) for message in messages])
+
+
+@router.get("/conversations", response_model=list[Conversation])
+async def conversations(
+    user: Annotated[UserRecord, Depends(get_current_user)],
+) -> list[ConversationRecord]:
+    return await user_store.list_conversations(user.id)
+
+
+@router.get("/conversations/{thread_id}/messages", response_model=ChatHistory)
+async def conversation_messages(
+    thread_id: str,
+    user: Annotated[UserRecord, Depends(get_current_user)],
+) -> ChatHistory:
+    conversation = await user_store.get_conversation(user.id, thread_id)
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    try:
+        return await _conversation_history(conversation)
+    except Exception as e:
+        logger.exception("Failed to retrieve history for thread %s: %s", thread_id, e)
+        raise HTTPException(status_code=500, detail="Unexpected error") from e
+
+
 @router.post("/history")
-async def history(input: ChatHistoryInput) -> ChatHistory:
+async def history(
+    input: ChatHistoryInput,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+) -> ChatHistory:
     """
     Get chat history.
     """
-    # TODO: Hard-coding DEFAULT_AGENT here is wonky
-    agent: AgentGraph = get_agent(DEFAULT_AGENT)
-    try:
-        state_snapshot = await agent.aget_state(
-            config=RunnableConfig(configurable={"thread_id": input.thread_id})
+    if auth.user is not None:
+        conversation = await user_store.get_conversation(auth.user.id, input.thread_id)
+        if conversation is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+            )
+    else:
+        now = datetime.now().astimezone()
+        conversation = ConversationRecord(
+            thread_id=input.thread_id,
+            user_id=UUID(int=0),
+            title="Service conversation",
+            agent_id=DEFAULT_AGENT,
+            model=str(settings.DEFAULT_MODEL),
+            created_at=now,
+            updated_at=now,
         )
-        messages: list[AnyMessage] = state_snapshot.values.get("messages", [])
-        chat_messages: list[ChatMessage] = [langchain_to_chat_message(m) for m in messages]
-        return ChatHistory(messages=chat_messages)
+    try:
+        return await _conversation_history(conversation)
     except Exception as e:
         logger.exception("Failed to retrieve history for thread %s: %s", input.thread_id, e)
-        raise HTTPException(status_code=500, detail="Unexpected error")
+        raise HTTPException(status_code=500, detail="Unexpected error") from e
 
 
 @app.get("/health")

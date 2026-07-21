@@ -1,5 +1,10 @@
 <template>
+  <div v-if="authLoading" class="grid min-h-screen place-items-center bg-slate-950 text-lg font-semibold text-white">
+    Loading workspace…
+  </div>
+  <AuthScreen v-else-if="!currentUser" @authenticated="handleAuthenticated" />
   <div
+    v-else
     class="grid min-h-screen grid-cols-1 bg-white text-[#31333f] min-[901px]:grid-cols-[21rem_minmax(0,1fr)]"
   >
     <aside class="flex flex-col gap-3.5 bg-slate-100 px-4 py-4 min-[901px]:min-h-screen min-[901px]:pt-24">
@@ -10,7 +15,42 @@
         </p>
       </div>
 
+      <div class="rounded-xl border border-slate-200 bg-white p-3">
+        <div class="font-bold text-slate-900">{{ currentUser.display_name }}</div>
+        <div class="truncate text-xs text-slate-500">{{ currentUser.email }}</div>
+        <button class="mt-2 text-xs font-bold text-red-600 hover:underline" type="button" @click="signOut">
+          Sign out
+        </button>
+      </div>
+
       <button :class="sidebarButtonClass" type="button" @click="newChat">▣ New Chat</button>
+
+      <section class="min-h-0">
+        <div class="mb-2 flex items-center justify-between px-1">
+          <span class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">History</span>
+          <button class="border-0 bg-transparent text-xs font-bold text-slate-500 hover:text-slate-900" type="button" @click="refreshConversations">
+            Refresh
+          </button>
+        </div>
+        <div class="grid max-h-56 gap-1.5 overflow-y-auto pr-1">
+          <button
+            v-for="conversation in conversations"
+            :key="conversation.thread_id"
+            class="rounded-lg border px-3 py-2.5 text-left transition"
+            :class="conversation.thread_id === threadId ? 'border-red-300 bg-red-50' : 'border-transparent bg-white/70 hover:border-slate-300 hover:bg-white'"
+            type="button"
+            @click="selectConversation(conversation)"
+          >
+            <span class="block truncate text-sm font-semibold text-slate-800">{{ conversation.title }}</span>
+            <span class="mt-1 block truncate text-xs text-slate-500">
+              {{ conversation.agent_id }} · {{ formatConversationDate(conversation.updated_at) }}
+            </span>
+          </button>
+          <p v-if="!conversations.length" class="m-0 rounded-lg bg-white/60 px-3 py-3 text-sm text-slate-500">
+            No saved conversations yet.
+          </p>
+        </div>
+      </section>
       <button :class="sidebarButtonClass" type="button" @click="activeView = 'documents'">
         ▤ RAG Documents
       </button>
@@ -41,8 +81,8 @@
             <span :class="fieldLabelClass">Stream results</span>
           </label>
           <label :class="fieldClass">
-            <span :class="fieldLabelClass">User ID</span>
-            <input :value="userId" :class="fieldControlClass" disabled />
+            <span :class="fieldLabelClass">Account ID</span>
+            <input :value="currentUser.id" :class="fieldControlClass" disabled />
           </label>
         </div>
       </section>
@@ -139,7 +179,7 @@
       </div>
 
       <form
-        class="fixed bottom-[1.6rem] left-4 right-4 mx-auto grid max-w-[820px] grid-cols-[minmax(0,1fr)_auto] gap-2.5 rounded-xl border border-slate-300 bg-white p-2.5 shadow-[0_12px_32px_rgba(31,41,55,0.1)] min-[901px]:left-[calc(21rem+2rem)] min-[901px]:right-8"
+        class="sticky bottom-4 mx-auto grid w-full max-w-[820px] grid-cols-[minmax(0,1fr)_auto] gap-2.5 rounded-xl border border-slate-300 bg-white p-2.5 shadow-[0_12px_32px_rgba(31,41,55,0.1)] min-[901px]:fixed min-[901px]:bottom-[1.6rem] min-[901px]:left-[calc(21rem+2rem)] min-[901px]:right-8 min-[901px]:w-auto"
         @submit.prevent="submitMessage"
       >
         <input
@@ -183,15 +223,38 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import { getHistory, getInfo, invokeAgent, sendFeedback, streamAgent } from "./api";
+import {
+  clearAccessToken,
+  getAccessToken,
+  getCurrentUser,
+  getHistory,
+  getInfo,
+  invokeAgent,
+  listConversations,
+  logoutUser,
+  sendFeedback,
+  streamAgent
+} from "./api";
+import AuthScreen from "./AuthScreen.vue";
 import RagDocuments from "./RagDocuments.vue";
-import type { ChatMessage, ChatMessageType, ServiceMetadata, TaskData } from "./types";
+import type {
+  AuthResponse,
+  ChatMessage,
+  ChatMessageType,
+  Conversation,
+  ServiceMetadata,
+  TaskData,
+  UserProfile
+} from "./types";
 
 type RenderItem =
   | { id: string; kind: "message"; message: ChatMessage }
   | { id: string; kind: "task"; task: TaskData };
 
 const metadata = ref<ServiceMetadata | null>(null);
+const authLoading = ref(true);
+const currentUser = ref<UserProfile | null>(null);
+const conversations = ref<Conversation[]>([]);
 const activeView = ref<"chat" | "documents">("chat");
 const selectedAgent = ref("");
 const selectedModel = ref("");
@@ -210,8 +273,7 @@ const streamingText = ref("");
 const selectedFeedback = ref(0);
 const feedbackStatus = ref("");
 
-const userId = getOrCreateQueryParam("user_id");
-const threadId = ref(getOrCreateQueryParam("thread_id"));
+const threadId = ref(getQueryParam("thread_id") || crypto.randomUUID());
 
 const sidebarButtonClass =
   "min-h-[46px] w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60";
@@ -234,7 +296,6 @@ const latestAiRunId = computed(() => {
 const shareUrl = computed(() => {
   const url = new URL(window.location.href);
   url.searchParams.set("thread_id", threadId.value);
-  url.searchParams.set("user_id", userId);
   return url.toString();
 });
 
@@ -254,17 +315,46 @@ const welcomeMessage = computed(() => {
 });
 
 onMounted(async () => {
+  if (!getAccessToken()) {
+    authLoading.value = false;
+    return;
+  }
   try {
-    metadata.value = await getInfo();
-    selectedAgent.value = metadata.value.default_agent;
-    selectedModel.value = metadata.value.default_model;
-    if (new URL(window.location.href).searchParams.has("thread_id")) {
-      await loadHistory();
-    }
+    currentUser.value = await getCurrentUser();
+    await initializeWorkspace();
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Error connecting to agent service.";
+    clearAccessToken();
+    currentUser.value = null;
+  } finally {
+    authLoading.value = false;
   }
 });
+
+async function handleAuthenticated(response: AuthResponse): Promise<void> {
+  currentUser.value = response.user;
+  authLoading.value = true;
+  try {
+    await initializeWorkspace();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "Error loading workspace.";
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+async function initializeWorkspace(): Promise<void> {
+  metadata.value = await getInfo();
+  selectedAgent.value = metadata.value.default_agent;
+  selectedModel.value = metadata.value.default_model;
+  await refreshConversations();
+  const requestedThread = getQueryParam("thread_id");
+  const conversation = conversations.value.find((item) => item.thread_id === requestedThread);
+  if (conversation) {
+    await selectConversation(conversation);
+  } else {
+    newChat();
+  }
+}
 
 async function submitMessage(): Promise<void> {
   if (!draft.value || !metadata.value || loading.value) {
@@ -290,7 +380,6 @@ async function submitMessage(): Promise<void> {
           message: content,
           model: selectedModel.value,
           threadId: threadId.value,
-          userId,
           streamTokens: true
         },
         (event) => {
@@ -313,11 +402,11 @@ async function submitMessage(): Promise<void> {
         agent: selectedAgent.value,
         message: content,
         model: selectedModel.value,
-        threadId: threadId.value,
-        userId
+        threadId: threadId.value
       });
       appendMessage(response);
     }
+    await refreshConversations();
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Error generating response.";
   } finally {
@@ -360,6 +449,28 @@ async function loadHistory(): Promise<void> {
   }
 }
 
+async function refreshConversations(): Promise<void> {
+  try {
+    conversations.value = await listConversations();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "Failed to load conversations.";
+  }
+}
+
+async function selectConversation(conversation: Conversation): Promise<void> {
+  if (loading.value) {
+    return;
+  }
+  activeView.value = "chat";
+  threadId.value = conversation.thread_id;
+  selectedAgent.value = conversation.agent_id;
+  selectedModel.value = conversation.model;
+  const url = new URL(window.location.href);
+  url.searchParams.set("thread_id", threadId.value);
+  window.history.replaceState({}, "", url.toString());
+  await loadHistory();
+}
+
 function newChat(): void {
   activeView.value = "chat";
   messages.value = [];
@@ -371,7 +482,25 @@ function newChat(): void {
   threadId.value = crypto.randomUUID();
   const url = new URL(window.location.href);
   url.searchParams.set("thread_id", threadId.value);
-  url.searchParams.set("user_id", userId);
+  window.history.replaceState({}, "", url.toString());
+}
+
+async function signOut(): Promise<void> {
+  try {
+    await logoutUser();
+  } catch {
+    // Local logout must still succeed if the backend is temporarily unavailable.
+  }
+  clearAccessToken();
+  currentUser.value = null;
+  metadata.value = null;
+  conversations.value = [];
+  messages.value = [];
+  renderItems.value = [];
+  toolResults.value = {};
+  const url = new URL(window.location.href);
+  url.searchParams.delete("thread_id");
+  url.searchParams.delete("user_id");
   window.history.replaceState({}, "", url.toString());
 }
 
@@ -406,16 +535,16 @@ function createMessage(type: ChatMessageType, content: string): ChatMessage {
   };
 }
 
-function getOrCreateQueryParam(name: string): string {
+function getQueryParam(name: string): string {
   const url = new URL(window.location.href);
-  const existing = url.searchParams.get(name);
-  if (existing) {
-    return existing;
-  }
-  const value = crypto.randomUUID();
-  url.searchParams.set(name, value);
-  window.history.replaceState({}, "", url.toString());
-  return value;
+  return url.searchParams.get(name) ?? "";
+}
+
+function formatConversationDate(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric"
+  }).format(new Date(value));
 }
 
 function avatarFor(type: ChatMessageType): string {
