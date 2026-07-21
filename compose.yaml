@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:0.8.2-pg16
     ports:
       # Dedicated host port; Langfuse PostgreSQL uses 15432 and is a separate stack.
       - "127.0.0.1:${POSTGRES_HOST_PORT:-15433}:5432"
@@ -29,8 +29,6 @@ services:
     env_file:
       - .env
     volumes:
-      # Generated locally by scripts/create_chroma_db.py and reused by RAG queries.
-      - ./chroma_db:/app/chroma_db
       # Development-only credentials are ignored by Compose watch.
       - ./privatecredentials:/privatecredentials
     environment:

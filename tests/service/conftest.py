@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage
 
 from core import settings
 from core.observability import get_langfuse_client
+from rag import rag_store
 from service import app
 
 
@@ -14,6 +15,13 @@ def disable_live_langfuse_for_unit_tests(monkeypatch):
     """Unit tests must not export traces to a developer's configured project."""
     monkeypatch.setattr(settings, "LANGFUSE_TRACING", False)
     get_langfuse_client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def disable_live_rag_store_for_unit_tests(monkeypatch):
+    """Unit tests must not connect to a developer's PostgreSQL RAG tables."""
+    monkeypatch.setattr(rag_store, "open", AsyncMock())
+    monkeypatch.setattr(rag_store, "close", AsyncMock())
     yield
     get_langfuse_client.cache_clear()
 

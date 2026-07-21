@@ -1,17 +1,10 @@
 import math
 import re
-from threading import Lock
 
 import numexpr
-from langchain_chroma import Chroma
 from langchain_core.tools import BaseTool, tool
-from langchain_core.vectorstores import VectorStoreRetriever
 
-from core.embeddings import get_embeddings
-from core.settings import settings
-
-_chroma_retriever: VectorStoreRetriever | None = None
-_chroma_retriever_lock = Lock()
+from rag import rag_store
 
 
 def calculator_func(expression: str) -> str:
@@ -72,40 +65,9 @@ def format_contexts(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def load_chroma_db() -> VectorStoreRetriever:
-    """Initialize the local Chroma retriever once and reuse it across requests."""
-    global _chroma_retriever
-
-    if _chroma_retriever is None:
-        # Chroma's embedded Rust client shares process-global state by persistence
-        # path. Serializing first use avoids concurrent clients racing to create
-        # and stop that shared system.
-        with _chroma_retriever_lock:
-            if _chroma_retriever is None:
-                try:
-                    embeddings = get_embeddings()
-                except Exception as e:
-                    raise RuntimeError(
-                        "Failed to initialize Ollama embeddings. Ensure Ollama is running and "
-                        f"the '{settings.OLLAMA_EMBEDDING_MODEL}' model is installed."
-                    ) from e
-
-                chroma_db = Chroma(
-                    persist_directory=settings.CHROMA_DB_PATH,
-                    embedding_function=embeddings,
-                )
-                _chroma_retriever = chroma_db.as_retriever(search_kwargs={"k": 5})
-
-    return _chroma_retriever
-
-
-def database_search_func(query: str) -> str:
-    """Searches chroma_db for information in the company's handbook."""
-    # Get the chroma retriever
-    retriever = load_chroma_db()
-
-    # Search the database for relevant documents
-    documents = retriever.invoke(query)
+async def database_search_func(query: str) -> str:
+    """Searches the pgvector RAG knowledge base for relevant document chunks."""
+    documents = await rag_store.similarity_search(query)
 
     # Format the documents into a string
     context_str = format_contexts(documents)

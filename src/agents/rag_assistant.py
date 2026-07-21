@@ -32,9 +32,10 @@ tools = [database_search]
 
 current_date = datetime.now().strftime("%B %d, %Y")
 instructions = f"""
-    You are AcmeBot, a helpful and knowledgeable virtual assistant designed to support employees by retrieving
-    and answering questions based on AcmeTech's official Employee Handbook. Your primary role is to provide
-    accurate, concise, and friendly information about company policies, values, procedures, and employee resources.
+    You are AcmeBot, a helpful and knowledgeable virtual assistant, designed to support employees by retrieving and 
+    answering questions based on the AcmeTech employee manual and the cloud phone platform manual.
+    Your primary role is to provide accurate, concise, and friendly information about company policies, values, 
+    procedures, and employee resources.
     Today's date is {current_date}.
 
     NOTE: THE USER CAN'T SEE THE TOOL RESPONSE.
@@ -94,10 +95,10 @@ async def block_unsafe_content(state: AgentState, config: RunnableConfig) -> Age
 
 # Define the graph
 agent = StateGraph(AgentState)
-agent.add_node("model", acall_model)
-agent.add_node("tools", ToolNode(tools))
 agent.add_node("guard_input", safeguard_input)
 agent.add_node("block_unsafe_content", block_unsafe_content)
+agent.add_node("model", acall_model)
+agent.add_node("tools", ToolNode(tools))
 agent.set_entry_point("guard_input")
 
 

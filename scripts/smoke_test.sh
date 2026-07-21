@@ -178,6 +178,19 @@ print('  wrote long-term Store record')
     psql -U "$postgres_user" -d "$postgres_db" -tAc \
     "select count(*) from checkpoints where thread_id='$SMOKE_THREAD_ID'" 2>/dev/null | tr -d '[:space:]')" || true
   assert_positive_count "$n" "postgres checkpoint rows for this run's thread"
+  n="$(docker exec -e PGPASSWORD="$postgres_password" "$cid" \
+    psql -U "$postgres_user" -d "$postgres_db" -tAc \
+    "select count(*) from pg_extension where extname='vector'" 2>/dev/null | tr -d '[:space:]')" || true
+  assert_positive_count "$n" "pgvector extension registrations"
+  n="$(docker exec -e PGPASSWORD="$postgres_password" "$cid" \
+    psql -U "$postgres_user" -d "$postgres_db" -tAc \
+    "select count(*) from pg_tables where schemaname='public' and tablename in ('rag_documents','rag_chunks')" 2>/dev/null | tr -d '[:space:]')" || true
+  if [[ "$n" == "2" ]]; then
+    echo "  ✓ verified: pgvector RAG tables initialized"
+  else
+    echo "  ✗ FAIL: expected both pgvector RAG tables, got '$n'"
+    return 1
+  fi
 
   # Stop the whole application process, reconnect with new pools, and prove both
   # the conversation checkpoint and Store item survived that restart.

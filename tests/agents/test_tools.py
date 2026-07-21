@@ -1,27 +1,20 @@
-from concurrent.futures import ThreadPoolExecutor
-from time import sleep
-from unittest.mock import Mock
+from unittest.mock import AsyncMock
+
+import pytest
 
 from agents import tools
 
 
-def test_load_chroma_db_initializes_once_under_concurrency(monkeypatch):
-    retriever = Mock()
-    chroma = Mock()
-    chroma.as_retriever.return_value = retriever
+@pytest.mark.asyncio
+async def test_database_search_uses_pgvector_store(monkeypatch):
+    documents = [
+        type("Document", (), {"page_content": "Employees receive 15 days of PTO."})(),
+        type("Document", (), {"page_content": "PTO accrues monthly."})(),
+    ]
+    search = AsyncMock(return_value=documents)
+    monkeypatch.setattr(tools.rag_store, "similarity_search", search)
 
-    def create_chroma(**kwargs):
-        sleep(0.01)
-        return chroma
+    result = await tools.database_search_func("How much PTO is provided?")
 
-    monkeypatch.setattr(tools, "_chroma_retriever", None)
-    monkeypatch.setattr(tools, "get_embeddings", Mock(return_value=Mock()))
-    chroma_factory = Mock(side_effect=create_chroma)
-    monkeypatch.setattr(tools, "Chroma", chroma_factory)
-
-    with ThreadPoolExecutor(max_workers=20) as pool:
-        results = list(pool.map(lambda _: tools.load_chroma_db(), range(20)))
-
-    assert all(result is retriever for result in results)
-    chroma_factory.assert_called_once()
-    chroma.as_retriever.assert_called_once_with(search_kwargs={"k": 5})
+    assert result == "Employees receive 15 days of PTO.\n\nPTO accrues monthly."
+    search.assert_awaited_once_with("How much PTO is provided?")

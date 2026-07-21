@@ -2,6 +2,7 @@ import type {
   ChatHistory,
   ChatMessage,
   FeedbackPayload,
+  RagDocument,
   ServiceMetadata,
   StreamEvent
 } from "./types";
@@ -110,6 +111,37 @@ export async function sendFeedback(payload: FeedbackPayload): Promise<void> {
   });
   if (!response.ok) {
     throw new Error(`Feedback failed: ${response.status}`);
+  }
+}
+
+export async function listRagDocuments(): Promise<RagDocument[]> {
+  const response = await fetch(`${API_BASE_URL}/rag/documents`);
+  if (!response.ok) {
+    throw new Error(`Failed to load RAG documents: ${response.status}`);
+  }
+  return (await response.json()) as RagDocument[];
+}
+
+export async function uploadRagDocument(file: File): Promise<RagDocument> {
+  const body = new FormData();
+  body.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/rag/documents`, {
+    method: "POST",
+    body
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail || `Document upload failed: ${response.status}`);
+  }
+  return (await response.json()) as RagDocument;
+}
+
+export async function deleteRagDocument(documentId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/rag/documents/${encodeURIComponent(documentId)}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(`Document deletion failed: ${response.status}`);
   }
 }
 

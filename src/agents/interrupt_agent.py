@@ -129,7 +129,8 @@ async def determine_birthdate(
     # If birthdate wasn't retrieved from store, proceed with extraction
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     model_runnable = wrap_model(
-        m.with_structured_output(BirthdateExtraction), birthdate_extraction_prompt.format()
+        m.with_structured_output(BirthdateExtraction),
+        birthdate_extraction_prompt.format()
     ).with_config(tags=["skip_stream"])
     response: BirthdateExtraction = await model_runnable.ainvoke(state, config)
 

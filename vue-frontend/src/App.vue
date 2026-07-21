@@ -11,6 +11,9 @@
       </div>
 
       <button :class="sidebarButtonClass" type="button" @click="newChat">▣ New Chat</button>
+      <button :class="sidebarButtonClass" type="button" @click="activeView = 'documents'">
+        ▤ RAG Documents
+      </button>
 
       <section>
         <button :class="sidebarButtonClass" type="button" @click="settingsOpen = !settingsOpen">
@@ -66,7 +69,7 @@
       <p class="m-0 text-sm text-slate-500">Made with ♡ by Joshua in Oakland</p>
     </aside>
 
-    <main class="relative flex min-w-0 flex-col items-center px-4 pb-28 pt-8 min-[901px]:px-8 min-[901px]:pb-[7.5rem] min-[901px]:pt-[6.8rem]">
+    <main v-if="activeView === 'chat'" class="relative flex min-w-0 flex-col items-center px-4 pb-28 pt-8 min-[901px]:px-8 min-[901px]:pb-[7.5rem] min-[901px]:pt-[6.8rem]">
       <div v-if="error" class="mb-5 w-full max-w-[820px] rounded-lg bg-red-50 px-4 py-4 font-semibold text-red-600">
         {{ error }}
       </div>
@@ -156,6 +159,8 @@
       </form>
     </main>
 
+    <RagDocuments v-else @back="activeView = 'chat'" />
+
     <div v-if="architectureOpen" class="fixed inset-0 z-50 grid place-items-center bg-slate-900/35 p-6" @click.self="architectureOpen = false">
       <div :class="modalClass">
         <button :class="modalCloseClass" type="button" aria-label="Close architecture modal" @click="architectureOpen = false">×</button>
@@ -179,6 +184,7 @@
 import { computed, onMounted, ref } from "vue";
 
 import { getHistory, getInfo, invokeAgent, sendFeedback, streamAgent } from "./api";
+import RagDocuments from "./RagDocuments.vue";
 import type { ChatMessage, ChatMessageType, ServiceMetadata, TaskData } from "./types";
 
 type RenderItem =
@@ -186,6 +192,7 @@ type RenderItem =
   | { id: string; kind: "task"; task: TaskData };
 
 const metadata = ref<ServiceMetadata | null>(null);
+const activeView = ref<"chat" | "documents">("chat");
 const selectedAgent = ref("");
 const selectedModel = ref("");
 const useStreaming = ref(true);
@@ -354,6 +361,7 @@ async function loadHistory(): Promise<void> {
 }
 
 function newChat(): void {
+  activeView.value = "chat";
   messages.value = [];
   renderItems.value = [];
   toolResults.value = {};

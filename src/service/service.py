@@ -27,6 +27,7 @@ from core.observability import (
     observe_agent_run,
 )
 from memory import initialize_database, initialize_store
+from rag import rag_store
 from schema import (
     ChatHistory,
     ChatHistoryInput,
@@ -38,6 +39,7 @@ from schema import (
     UserInput,
 )
 from service.agui import router as agui_router
+from service.rag import router as rag_router
 from service.utils import (
     convert_message_content_to_string,
     langchain_to_chat_message,
@@ -75,37 +77,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         # Initialize both checkpointer (for short-term memory) and store (for long-term memory)
         async with initialize_database() as saver, initialize_store() as store:
-            # Set up both components
-            if hasattr(saver, "setup"):  # ignore: union-attr
-                await saver.setup()
-            # Only setup store for Postgres as InMemoryStore doesn't need setup
-            if hasattr(store, "setup"):  # ignore: union-attr
-                await store.setup()
-
-            if not settings.AUTH_SECRET:
-                logger.warning(
-                    "AUTH_SECRET is not configured — all API endpoints are unauthenticated. "
-                    "Set AUTH_SECRET in your environment to enable bearer token authentication."
-                )
-
-            # Configure agents with both memory components and async loading
-            agents = get_all_agent_info()
-            for a in agents:
-                try:
-                    await load_agent(a.key)
-                    logger.info(f"Agent loaded: {a.key}")
-                except Exception as e:
-                    logger.exception("Failed to load agent %s: %s", a.key, e)
-                    # Continue with other agents rather than failing startup
-
-                agent = get_agent(a.key)
-                # Set checkpointer for thread-scoped memory (conversation history)
-                agent.checkpointer = saver
-                # Set store for long-term memory (cross-conversation knowledge)
-                agent.store = store
+            await rag_store.open()
             try:
+                # Set up both components
+                if hasattr(saver, "setup"):  # ignore: union-attr
+                    await saver.setup()
+                # Only setup store for Postgres as InMemoryStore doesn't need setup
+                if hasattr(store, "setup"):  # ignore: union-attr
+                    await store.setup()
+
+                if not settings.AUTH_SECRET:
+                    logger.warning(
+                        "AUTH_SECRET is not configured — all API endpoints are unauthenticated. "
+                        "Set AUTH_SECRET in your environment to enable bearer token authentication."
+                    )
+
+                # Configure agents with both memory components and async loading
+                agents = get_all_agent_info()
+                for a in agents:
+                    try:
+                        await load_agent(a.key)
+                        logger.info(f"Agent loaded: {a.key}")
+                    except Exception as e:
+                        logger.exception("Failed to load agent %s: %s", a.key, e)
+                        # Continue with other agents rather than failing startup
+
+                    agent = get_agent(a.key)
+                    # Set checkpointer for thread-scoped memory (conversation history)
+                    agent.checkpointer = saver
+                    # Set store for long-term memory (cross-conversation knowledge)
+                    agent.store = store
                 yield
             finally:
+                await rag_store.close()
                 flush_langfuse()
     except Exception as e:
         logger.exception("Error during database/store/agents initialization: %s", e)
@@ -133,6 +137,7 @@ app.add_middleware(
 router = APIRouter(dependencies=[Depends(verify_bearer)])
 # AG-UI protocol endpoints inherit the same bearer auth - see service/agui.py
 router.include_router(agui_router)
+router.include_router(rag_router)
 
 
 @router.get("/info")

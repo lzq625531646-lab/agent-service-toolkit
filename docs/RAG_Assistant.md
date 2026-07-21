@@ -1,8 +1,9 @@
 # Creating a RAG assistant
 
-You can build a RAG assistant using a Chroma database.
+The RAG assistant stores documents, chunks, metadata, and Ollama-generated embeddings
+in the project's dedicated PostgreSQL database using the pgvector extension.
 
-## Setting up Chroma
+## Setting up pgvector
 
 The RAG assistant uses Ollama embeddings. Start Ollama and pull the configured
 model before creating or querying the database:
@@ -11,31 +12,40 @@ model before creating or querying the database:
 ollama pull embeddinggemma
 ```
 
-`OLLAMA_EMBEDDING_MODEL`, `OLLAMA_EMBEDDING_BASE_URL`, and `CHROMA_DB_PATH`
-control the shared embedding model, Ollama endpoint, and persisted Chroma path.
+`OLLAMA_EMBEDDING_MODEL` and `OLLAMA_EMBEDDING_BASE_URL` control the shared
+embedding model and Ollama endpoint. `RAG_EMBEDDING_DIMENSIONS` must match the
+configured model; `embeddinggemma` currently produces 768-dimensional vectors.
 Indexing and retrieval must always use the same embedding model.
 
-To create a Chroma database:
+Start the dedicated PostgreSQL/pgvector container:
 
-1. Add the data you want to use to a folder, i.e. `./data`, Word and PDF files are currently supported.
-2. Open [`create_chroma_db.py` file](../scripts/create_chroma_db.py) and set the folder_path variable to the path to your data i.e. `./data`.
-3. You can change the database name, chunk size and overlap size.
-4. Assuming you have already followed the [Quickstart](../README.md#quickstart) and activated the virtual environment, to create the database run:
+```sh
+docker compose up -d postgres
+```
 
-   ```sh
-   uv run python scripts/create_chroma_db.py
-   ```
+The service creates the `vector` extension plus the `rag_documents` and
+`rag_chunks` tables during startup. To import every supported PDF, DOCX, TXT, or
+Markdown file from `./data`, run:
 
-5. If successful, a Chroma db will be created in the repository root directory.
+```sh
+uv run python scripts/import_rag_documents.py
+```
+
+Documents can also be managed from the Vue **RAG Documents** page or through:
+
+```text
+GET    /rag/documents
+POST   /rag/documents        multipart field: file
+DELETE /rag/documents/{id}
+```
 
 ## Configuring the RAG assistant
 
 To create a RAG assistant:
 
-1. Set `CHROMA_DB_PATH` if the generated database is not located at `./chroma_db`.
-2. Modify the amount of documents returned, currently set to 5.
-3. Update the `database_search_func` function description to accurately describe what the purpose and contents of your database is.
-4. Open [`rag_assistant.py` file](../src/agents/rag_assistant.py) and update the agent's instuctions to describe what the assistant's speciality is and what knowledge it has access to, for example:
+1. Configure `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, and `RAG_SEARCH_K` if the defaults do not fit your documents.
+2. Update the `database_search_func` function description to accurately describe what the purpose and contents of your database is.
+3. Open [`rag_assistant.py` file](../src/agents/rag_assistant.py) and update the agent's instructions to describe what the assistant's specialty is and what knowledge it has access to, for example:
 
    ```python
    instructions = f"""
@@ -52,10 +62,10 @@ To create a RAG assistant:
        """
    ```
 
-5. Open [`streamlit_app.py` file](../src/streamlit_app.py) and update the agent's welcome message:
+4. Open [`streamlit_app.py` file](../src/streamlit_app.py) and update the agent's welcome message:
 
    ```python
    WELCOME = """Hello! I'm your AI-powered HR assistant, here to help you navigate company policies, the employee handbook, and benefits. Ask me anything!""
    ```
 
-6. Run the application and test your RAG assistant.
+5. Run the application and test your RAG assistant.

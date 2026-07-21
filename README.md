@@ -60,7 +60,7 @@ docker compose watch
 1. **Multiple Agent Support**: Run multiple agents in the service and call by URL path. Available agents and models are described in `/info`
 1. **Asynchronous Design**: Utilizes async/await for efficient handling of concurrent requests.
 1. **Content Moderation**: Implements Safeguard for content moderation (requires Groq API key).
-1. **RAG Agent**: A basic RAG agent implementation using ChromaDB - see [docs](docs/RAG_Assistant.md).
+1. **RAG Agent**: A PostgreSQL pgvector-backed RAG agent with document management APIs and UI - see [docs](docs/RAG_Assistant.md).
 1. **Feedback Mechanism**: Includes a star-based feedback system integrated with Langfuse trace scores.
 1. **Docker Support**: Includes Dockerfiles and a docker compose file for easy development and deployment.
 1. **Testing**: Includes robust unit and integration tests for the full repo.
@@ -95,7 +95,7 @@ The repository is structured as follows:
 
 - [Setting up Ollama](docs/Ollama.md)
 - [Setting up VertexAI](docs/VertexAI.md)
-- [Setting up RAG with ChromaDB](docs/RAG_Assistant.md)
+- [Setting up RAG with PostgreSQL pgvector](docs/RAG_Assistant.md)
 
 ### Building or customizing your own agent
 

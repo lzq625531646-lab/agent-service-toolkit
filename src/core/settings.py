@@ -91,7 +91,11 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str | None = None
     OLLAMA_EMBEDDING_MODEL: str = "embeddinggemma"
     OLLAMA_EMBEDDING_BASE_URL: str = "http://localhost:11434"
-    CHROMA_DB_PATH: str = "./chroma_db"
+    RAG_EMBEDDING_DIMENSIONS: int = 768
+    RAG_CHUNK_SIZE: int = 2000
+    RAG_CHUNK_OVERLAP: int = 500
+    RAG_SEARCH_K: int = 5
+    RAG_MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
     USE_FAKE_MODEL: bool = False
     OPENROUTER_API_KEY: str | None = None
 

@@ -1,4 +1,6 @@
+from datetime import datetime
 from typing import Any, Literal, NotRequired
+from uuid import UUID
 
 from pydantic import BaseModel, Field, SerializeAsAny
 from typing_extensions import TypedDict
@@ -173,3 +175,15 @@ class ChatHistoryInput(BaseModel):
 
 class ChatHistory(BaseModel):
     messages: list[ChatMessage]
+
+
+class RagDocument(BaseModel):
+    """Metadata for a document indexed in the pgvector RAG store."""
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    chunk_count: int
+    created_at: datetime

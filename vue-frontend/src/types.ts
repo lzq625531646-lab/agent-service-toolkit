@@ -64,3 +64,13 @@ export interface FeedbackPayload {
   score: number;
   kwargs: Record<string, unknown>;
 }
+
+export interface RagDocument {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  chunk_count: number;
+  created_at: string;
+}
