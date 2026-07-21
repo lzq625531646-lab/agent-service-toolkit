@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await load_agent(a.key)
                     logger.info(f"Agent loaded: {a.key}")
                 except Exception as e:
-                    logger.error(f"Failed to load agent {a.key}: {e}")
+                    logger.exception("Failed to load agent %s: %s", a.key, e)
                     # Continue with other agents rather than failing startup
 
                 agent = get_agent(a.key)
@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 agent.store = store
             yield
     except Exception as e:
-        logger.error(f"Error during database/store/agents initialization: {e}")
+        logger.exception("Error during database/store/agents initialization: %s", e)
         raise
 
 
@@ -237,7 +237,7 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
         output.run_id = str(run_id)
         return output
     except Exception as e:
-        logger.error(f"An exception occurred: {e}")
+        logger.exception("Agent invocation failed for agent %s: %s", agent_id, e)
         raise HTTPException(status_code=500, detail="Unexpected error")
 
 
@@ -323,7 +323,7 @@ async def message_generator(
                     chat_message = langchain_to_chat_message(message)
                     chat_message.run_id = str(run_id)
                 except Exception as e:
-                    logger.error(f"Error parsing message: {e}")
+                    logger.exception("Error parsing streamed message: %s", e)
                     yield f"data: {json.dumps({'type': 'error', 'content': 'Unexpected error'})}\n\n"
                     continue
                 # LangGraph re-sends the input message, which feels weird, so drop it
@@ -348,7 +348,7 @@ async def message_generator(
                     # So we only print non-empty content.
                     yield f"data: {json.dumps({'type': 'token', 'content': convert_message_content_to_string(content)})}\n\n"
     except Exception as e:
-        logger.error(f"Error in message generator: {e}")
+        logger.exception("Message generator failed for agent %s: %s", agent_id, e)
         yield f"data: {json.dumps({'type': 'error', 'content': 'Internal server error'})}\n\n"
     finally:
         yield "data: [DONE]\n\n"
@@ -418,7 +418,7 @@ async def feedback(feedback: Feedback) -> FeedbackResponse:
             **kwargs,
         )
     except Exception as e:
-        logger.warning("Failed to record LangSmith feedback: %s", e)
+        logger.warning("Failed to record LangSmith feedback: %s", e, exc_info=True)
     return FeedbackResponse()
 
 
@@ -437,7 +437,7 @@ async def history(input: ChatHistoryInput) -> ChatHistory:
         chat_messages: list[ChatMessage] = [langchain_to_chat_message(m) for m in messages]
         return ChatHistory(messages=chat_messages)
     except Exception as e:
-        logger.error(f"An exception occurred: {e}")
+        logger.exception("Failed to retrieve history for thread %s: %s", input.thread_id, e)
         raise HTTPException(status_code=500, detail="Unexpected error")
 
 
@@ -452,7 +452,7 @@ async def health_check():
             langfuse = Langfuse()
             health_status["langfuse"] = "connected" if langfuse.auth_check() else "disconnected"
         except Exception as e:
-            logger.error(f"Langfuse connection error: {e}")
+            logger.exception("Langfuse health check failed: %s", e)
             health_status["langfuse"] = "disconnected"
 
     return health_status
