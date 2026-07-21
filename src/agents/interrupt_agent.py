@@ -26,6 +26,7 @@ class AgentState(MessagesState, total=False):
     """
 
     birthdate: datetime | None
+    background_summary: str
     user_request: str
 
 
@@ -62,14 +63,16 @@ Don't tell the user what their sign is, you are just demonstrating your knowledg
 async def background(state: AgentState, config: RunnableConfig) -> AgentState:
     """This node is to demonstrate doing work before the interrupt"""
 
-    user_request = _latest_human_message(state["messages"])
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     model_runnable = wrap_model(m, background_prompt.format())
     response = await model_runnable.ainvoke(state, config)
 
     return {
-        "messages": [AIMessage(content=response.content)],
-        "user_request": user_request,
+        # This is internal graph context, not an assistant turn visible to the user.
+        # Keeping it out of `messages` prevents it from polluting chat history or
+        # leaving the model input terminated by an internal AIMessage.
+        "background_summary": str(response.content),
+        "messages": [],
     }
 
 
@@ -197,19 +200,14 @@ You are a helpful assistant.
 Known information:
 - The user's birthdate is {birthdate_str}
 
-User's latest message: "{last_user_message}"
-
-Based on the known information and the user's message, provide a helpful and relevant response.
-If the user asked for their birthdate, confirm it.
-If the user asked for their zodiac sign, calculate it and tell them.
-Otherwise, respond conversationally based on their message.
+Based on the user's birthday, explain their zodiac sign, the meaning of the zodiac sign,
+ and the corresponding strengths and weaknesses of the personality.
 """)
 
 
 async def generate_response(state: AgentState, config: RunnableConfig) -> AgentState:
     """Generates the final response based on the user's query and the available birthdate."""
     birthdate = state.get("birthdate")
-    user_request = state.get("user_request") or _latest_human_message(state.get("messages", []))
 
     if not birthdate:
         # This should ideally not be reached if determine_birthdate worked correctly and possibly interrupted.
@@ -223,24 +221,32 @@ async def generate_response(state: AgentState, config: RunnableConfig) -> AgentS
         }
 
     birthdate_str = birthdate.strftime("%B %d, %Y")  # Format for display
+    conversation_messages = list(state.get("messages", []))
+    if not conversation_messages:
+        return {
+            "messages": [
+                AIMessage(content="I couldn't find the conversation context. Please try again.")
+            ]
+        }
 
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     system_prompt = response_prompt.format(
         birthdate_str=birthdate_str,
-        last_user_message=user_request,
     )
-    # Do not pass the background AIMessage as the final conversational turn. Some
-    # OpenAI-compatible providers treat an assistant-terminated history as already
-    # answered and return an empty completion.
+
+    # MessagesState plus the checkpointer contains the conversation accumulated for
+    # this thread_id. Pass it intact so follow-up questions retain their context.
+    # Internal node output such as `background_summary` is deliberately stored in a
+    # separate state field and therefore cannot masquerade as a conversation turn.
     response = await m.ainvoke(
-        [system_prompt, HumanMessage(content=user_request)],
+        [system_prompt, *conversation_messages],
         config,
     )
 
     if not response.content:
         logger.error(
-            "[generate_response] Model returned empty content for user request: %r",
-            user_request,
+            "[generate_response] Model returned empty content for conversation ending with: %r",
+            conversation_messages[-1],
         )
         return {
             "messages": [AIMessage(content="I couldn't generate a response. Please try again.")]

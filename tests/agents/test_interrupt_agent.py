@@ -42,27 +42,29 @@ async def test_determine_birthdate_returns_value_from_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_response_ends_model_input_with_original_user_request(monkeypatch) -> None:
+async def test_generate_response_passes_complete_conversation_history(monkeypatch) -> None:
     model = RecordingModel("Your zodiac sign is Capricorn.")
     monkeypatch.setattr(interrupt_agent, "get_model", lambda _: model)
+    history = [
+        HumanMessage(content="What is my zodiac sign?"),
+        AIMessage(content="Your zodiac sign is Capricorn."),
+        HumanMessage(content="What are its weaknesses?"),
+    ]
     state = {
-        "messages": [
-            HumanMessage(content="What is my zodiac sign?"),
-            AIMessage(content="Zodiac signs have ancient origins."),
-        ],
+        "messages": history,
         "birthdate": datetime(1996, 12, 27),
-        "user_request": "What is my zodiac sign?",
     }
     config = {"configurable": {}}
 
     result = await interrupt_agent.generate_response(state, config)
 
     assert result == {"messages": [AIMessage(content="Your zodiac sign is Capricorn.")]}
-    assert len(model.messages) == 2
+    assert len(model.messages) == 4
     assert isinstance(model.messages[0], SystemMessage)
     assert "December 27, 1996" in model.messages[0].content
-    assert isinstance(model.messages[1], HumanMessage)
-    assert model.messages[1].content == "What is my zodiac sign?"
+    assert model.messages[1:] == history
+    assert isinstance(model.messages[-1], HumanMessage)
+    assert model.messages[-1].content == "What are its weaknesses?"
 
 
 @pytest.mark.asyncio
