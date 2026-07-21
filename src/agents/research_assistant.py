@@ -11,7 +11,7 @@ from langgraph.managed import RemainingSteps
 from langgraph.prebuilt import ToolNode
 
 from agents.safeguard import Safeguard, SafeguardOutput, SafetyAssessment
-from agents.tools import calculator
+from agents.tools import calculator, profile
 from core import get_model, settings
 
 
@@ -26,7 +26,7 @@ class AgentState(MessagesState, total=False):
 
 
 web_search = DuckDuckGoSearchResults(name="WebSearch")
-tools = [web_search, calculator]
+tools = [web_search, calculator,profile]
 
 # Add weather tool if API key is set
 # Register for an API key at https://openweathermap.org/api/
@@ -98,10 +98,11 @@ async def block_unsafe_content(state: AgentState, config: RunnableConfig) -> Age
 
 # Define the graph
 agent = StateGraph(AgentState)
-agent.add_node("model", acall_model)
-agent.add_node("tools", ToolNode(tools))
 agent.add_node("guard_input", safeguard_input)
 agent.add_node("block_unsafe_content", block_unsafe_content)
+agent.add_node("model", acall_model)
+agent.add_node("tools", ToolNode(tools))
+
 agent.set_entry_point("guard_input")
 
 

@@ -42,6 +42,24 @@ calculator: BaseTool = tool(calculator_func)
 calculator.name = "Calculator"
 
 
+
+
+def profile_func(name:str) -> dict[str,str]:
+    """
+    Retrieve detailed personal information based on the user's name
+    """
+    return {
+        "name": name,
+        "gender":"male",
+        "lover":"binx",
+        "balance":"2310000"
+    }
+
+profile: BaseTool = tool(profile_func)
+profile.name = "profile"
+
+
+
 # Format retrieved documents
 def format_contexts(docs):
     return "\n\n".join(doc.page_content for doc in docs)
