@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     USE_AWS_BEDROCK: bool = False
     OLLAMA_MODEL: str | None = None
     OLLAMA_BASE_URL: str | None = None
+    OLLAMA_EMBEDDING_MODEL: str = "embeddinggemma"
+    OLLAMA_EMBEDDING_BASE_URL: str = "http://localhost:11434"
+    CHROMA_DB_PATH: str = "./chroma_db"
     USE_FAKE_MODEL: bool = False
     OPENROUTER_API_KEY: str | None = None
 
@@ -119,6 +122,9 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: Annotated[str, BeforeValidator(check_str_is_http)] = "https://cloud.langfuse.com"
     LANGFUSE_PUBLIC_KEY: SecretStr | None = None
     LANGFUSE_SECRET_KEY: SecretStr | None = None
+    LANGFUSE_ENVIRONMENT: str = "development"
+    LANGFUSE_RELEASE: str = "agent-service-toolkit"
+    LANGFUSE_DEBUG: bool = False
 
     # Database Configuration
     DATABASE_TYPE: DatabaseType = (

@@ -1,7 +1,6 @@
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import langsmith
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Interrupt, StateSnapshot
@@ -165,29 +164,37 @@ def test_invoke_interrupt(test_client, mock_agent) -> None:
     assert output.content == INTERRUPT
 
 
-@patch("service.service.LangsmithClient")
-def test_feedback(mock_client: langsmith.Client, test_client) -> None:
-    ls_instance = mock_client.return_value
-    ls_instance.create_feedback.return_value = None
+@patch("service.service.get_langfuse_client")
+def test_feedback(mock_get_langfuse_client: MagicMock, test_client) -> None:
+    langfuse = mock_get_langfuse_client.return_value
+    langfuse.create_trace_id.return_value = "langfuse-trace-id"
     body = {
         "run_id": "847c6285-8fc9-4560-a83f-4e6285809254",
         "key": "human-feedback-stars",
         "score": 0.8,
+        "kwargs": {"comment": "Helpful", "source": "streamlit"},
     }
     response = test_client.post("/feedback", json=body)
     assert response.status_code == 200
     assert response.json() == {"status": "success"}
-    ls_instance.create_feedback.assert_called_once_with(
-        run_id="847c6285-8fc9-4560-a83f-4e6285809254",
-        key="human-feedback-stars",
-        score=0.8,
+    langfuse.create_trace_id.assert_called_once_with(
+        seed="847c6285-8fc9-4560-a83f-4e6285809254"
+    )
+    langfuse.create_score.assert_called_once_with(
+        trace_id="langfuse-trace-id",
+        name="human-feedback-stars",
+        value=0.8,
+        data_type="NUMERIC",
+        comment="Helpful",
+        metadata={"source": "streamlit", "comment": "Helpful"},
     )
 
 
-@patch("service.service.LangsmithClient")
-def test_feedback_is_best_effort(mock_client: langsmith.Client, test_client) -> None:
-    ls_instance = mock_client.return_value
-    ls_instance.create_feedback.side_effect = Exception("Invalid token")
+@patch("service.service.get_langfuse_client")
+def test_feedback_is_best_effort(mock_get_langfuse_client: MagicMock, test_client) -> None:
+    langfuse = mock_get_langfuse_client.return_value
+    langfuse.create_trace_id.return_value = "langfuse-trace-id"
+    langfuse.create_score.side_effect = Exception("Langfuse unavailable")
     body = {
         "run_id": "847c6285-8fc9-4560-a83f-4e6285809254",
         "key": "human-feedback-stars",

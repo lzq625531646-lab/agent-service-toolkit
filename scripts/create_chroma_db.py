@@ -1,33 +1,37 @@
 import os
 import shutil
+import sys
+from pathlib import Path
 
-from dotenv import load_dotenv
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
-from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# Load environment variables from the .env file
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from core.embeddings import get_embeddings  # noqa: E402
+from core.settings import settings  # noqa: E402
 
 
 def create_chroma_db(
     folder_path: str,
-    db_name: str = "./chroma_db",
+    db_name: str | None = None,
     delete_chroma_db: bool = True,
     chunk_size: int = 2000,
     overlap: int = 500,
 ):
-    embeddings = OpenAIEmbeddings(api_key=os.environ["OPENAI_API_KEY"])
+    embeddings = get_embeddings()
+    db_path = db_name or settings.CHROMA_DB_PATH
 
     # Initialize Chroma vector store
-    if delete_chroma_db and os.path.exists(db_name):
-        shutil.rmtree(db_name)
-        print(f"Deleted existing database at {db_name}")
+    if delete_chroma_db and os.path.exists(db_path):
+        shutil.rmtree(db_path)
+        print(f"Deleted existing database at {db_path}")
 
     chroma = Chroma(
         embedding_function=embeddings,
-        persist_directory=f"./{db_name}",
+        persist_directory=db_path,
     )
 
     # Initialize text splitter
@@ -60,13 +64,13 @@ def create_chroma_db(
 
         print(f"Document {filename} added to database.")
 
-    print(f"Vector database created and saved in {db_name}.")
+    print(f"Vector database created and saved in {db_path}.")
     return chroma
 
 
 if __name__ == "__main__":
     # Path to the folder containing the documents
-    folder_path = "./data"
+    folder_path = str(PROJECT_ROOT / "data")
 
     # Create the Chroma database
     chroma = create_chroma_db(folder_path=folder_path)

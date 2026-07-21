@@ -78,8 +78,9 @@ THREAD_ID=my-thread node client.mjs "And another one" chatbot
   them, and they would expose server-side internals (including fully rendered prompts) to
   callers. If you need the full event firehose for debugging (e.g. the AG-UI Event Inspector)
   behind a trusted layer, remove the filter in `src/service/agui.py`.
-- **`/feedback` and `/history` are not bridged.** The AG-UI `runId` is client-generated and isn't
-  used as the LangSmith run ID, so star feedback doesn't apply to AG-UI runs. AG-UI clients
+- **`/feedback` and `/history` are not automatically bridged.** The AG-UI `runId` is
+  client-generated, but the server uses it to derive the Langfuse trace ID. An AG-UI client can
+  therefore submit `/feedback` with that same run ID to score its trace. AG-UI clients still
   manage their own message history from the event stream.
 - The `ag-ui-langgraph` package is pre-1.0 and pinned accordingly. If a future LangGraph major
   release ever conflicts with it, the integration should be dropped or lag behind rather than

@@ -1,10 +1,17 @@
 import math
 import re
+from threading import Lock
 
 import numexpr
 from langchain_chroma import Chroma
 from langchain_core.tools import BaseTool, tool
-from langchain_openai import OpenAIEmbeddings
+from langchain_core.vectorstores import VectorStoreRetriever
+
+from core.embeddings import get_embeddings
+from core.settings import settings
+
+_chroma_retriever: VectorStoreRetriever | None = None
+_chroma_retriever_lock = Lock()
 
 
 def calculator_func(expression: str) -> str:
@@ -65,19 +72,31 @@ def format_contexts(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def load_chroma_db():
-    # Create the embedding function for our project description database
-    try:
-        embeddings = OpenAIEmbeddings()
-    except Exception as e:
-        raise RuntimeError(
-            "Failed to initialize OpenAIEmbeddings. Ensure the OpenAI API key is set."
-        ) from e
+def load_chroma_db() -> VectorStoreRetriever:
+    """Initialize the local Chroma retriever once and reuse it across requests."""
+    global _chroma_retriever
 
-    # Load the stored vector database
-    chroma_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
-    retriever = chroma_db.as_retriever(search_kwargs={"k": 5})
-    return retriever
+    if _chroma_retriever is None:
+        # Chroma's embedded Rust client shares process-global state by persistence
+        # path. Serializing first use avoids concurrent clients racing to create
+        # and stop that shared system.
+        with _chroma_retriever_lock:
+            if _chroma_retriever is None:
+                try:
+                    embeddings = get_embeddings()
+                except Exception as e:
+                    raise RuntimeError(
+                        "Failed to initialize Ollama embeddings. Ensure Ollama is running and "
+                        f"the '{settings.OLLAMA_EMBEDDING_MODEL}' model is installed."
+                    ) from e
+
+                chroma_db = Chroma(
+                    persist_directory=settings.CHROMA_DB_PATH,
+                    embedding_function=embeddings,
+                )
+                _chroma_retriever = chroma_db.as_retriever(search_kwargs={"k": 5})
+
+    return _chroma_retriever
 
 
 def database_search_func(query: str) -> str:

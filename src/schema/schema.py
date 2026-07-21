@@ -137,7 +137,7 @@ class ChatMessage(BaseModel):
 
 
 class Feedback(BaseModel):  # type: ignore[no-redef]
-    """Feedback for a run, to record to LangSmith."""
+    """Feedback for a run, recorded as a Langfuse trace score when configured."""
 
     run_id: str = Field(
         description="Run ID to record feedback for.",
@@ -152,7 +152,7 @@ class Feedback(BaseModel):  # type: ignore[no-redef]
         examples=[0.8],
     )
     kwargs: dict[str, Any] = Field(
-        description="Additional feedback kwargs, passed to LangSmith.",
+        description="Additional feedback metadata recorded with the Langfuse score.",
         default={},
         examples=[{"comment": "In-line human feedback"}],
     )

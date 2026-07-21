@@ -26,7 +26,7 @@ class AgentState(MessagesState, total=False):
 
 
 web_search = DuckDuckGoSearchResults(name="WebSearch")
-tools = [web_search, calculator,profile]
+tools = [web_search, calculator, profile]
 
 # Add weather tool if API key is set
 # Register for an API key at https://openweathermap.org/api/
@@ -87,7 +87,7 @@ async def acall_model(state: AgentState, config: RunnableConfig) -> AgentState:
 
 async def safeguard_input(state: AgentState, config: RunnableConfig) -> AgentState:
     safeguard = Safeguard()
-    safety_output = await safeguard.ainvoke(state["messages"])
+    safety_output = await safeguard.ainvoke(state["messages"], config=config)
     return {"safety": safety_output, "messages": []}
 
 

@@ -2,15 +2,20 @@ services:
   postgres:
     image: postgres:16
     ports:
-      - "5432:5432"
+      # Dedicated host port; Langfuse PostgreSQL uses 15432 and is a separate stack.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15433}:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-agent_service}
+      - POSTGRES_USER=${POSTGRES_USER:-agent_service}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+      - POSTGRES_DB=${POSTGRES_DB:-agent_service_toolkit}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - agent_service_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-agent_service} -d ${POSTGRES_DB:-agent_service_toolkit}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -23,6 +28,22 @@ services:
       - "8080:8080"
     env_file:
       - .env
+    volumes:
+      # Generated locally by scripts/create_chroma_db.py and reused by RAG queries.
+      - ./chroma_db:/app/chroma_db
+      # Development-only credentials are ignored by Compose watch.
+      - ./privatecredentials:/privatecredentials
+    environment:
+      # Use the dedicated Compose-network database when the service runs in Docker.
+      - DATABASE_TYPE=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      # A service running in Docker cannot reach a host-side Langfuse via localhost.
+      # Override this with LANGFUSE_DOCKER_URL when Langfuse runs elsewhere.
+      - LANGFUSE_HOST=${LANGFUSE_DOCKER_URL:-http://host.docker.internal:3000}
+      - LANGFUSE_BASE_URL=${LANGFUSE_DOCKER_URL:-http://host.docker.internal:3000}
+      # Ollama runs on the host; use OLLAMA_EMBEDDING_DOCKER_URL to override.
+      - OLLAMA_EMBEDDING_BASE_URL=${OLLAMA_EMBEDDING_DOCKER_URL:-http://host.docker.internal:11434}
     depends_on:
       postgres:
         condition: service_healthy
@@ -31,9 +52,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    # Volume mount of development-only credentials since compose watch doesn't sync ignored files and doesn't do initial sync when the service starts
-    volumes:
-      - ./privatecredentials:/privatecredentials
     develop:
       watch:
         - path: src/agents/
@@ -79,4 +97,4 @@ services:
           target: /app/streamlit_app.py
 
 volumes:
-  postgres_data:
+  agent_service_postgres_data:

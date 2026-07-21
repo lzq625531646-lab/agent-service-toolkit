@@ -322,9 +322,8 @@ class AgentClient:
         """
         Create a feedback record for a run.
 
-        This is a simple wrapper for the LangSmith create_feedback API, so the
-        credentials can be stored and managed in the service rather than the client.
-        See: https://api.smith.langchain.com/redoc#tag/feedback/operation/create_feedback_api_v1_feedback_post
+        The service records the feedback as a score on the corresponding
+        Langfuse trace, keeping observability credentials out of the client.
         """
         request = Feedback(run_id=run_id, key=key, score=score, kwargs=kwargs)
         async with httpx.AsyncClient() as client:

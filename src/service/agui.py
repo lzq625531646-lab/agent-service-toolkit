@@ -19,10 +19,10 @@ from ag_ui_langgraph import LangGraphAgent
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
-from langfuse.langchain import CallbackHandler  # type: ignore[import-untyped]
 
 from agents import DEFAULT_AGENT, AgentGraph, get_agent
 from core import settings
+from core.observability import get_langfuse_handler, observe_agent_run
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ def _base_config(input_data: RunAgentInput) -> RunnableConfig:
         )
 
     callbacks: list[Any] = []
-    if settings.LANGFUSE_TRACING:
-        callbacks.append(CallbackHandler())
+    if langfuse_handler := get_langfuse_handler():
+        callbacks.append(langfuse_handler)
 
     return RunnableConfig(configurable=dict(configurable), callbacks=callbacks)
 
@@ -67,15 +67,43 @@ async def _event_stream(
 ) -> AsyncGenerator[str, None]:
     # A new LangGraphAgent per request: it holds per-run state and is cheap to build.
     agent = LangGraphAgent(name=agent_id, graph=graph, config=config)  # type: ignore[arg-type]
-    async for event in agent.run(input_data):
-        # Don't forward RAW passthrough events. Standard AG-UI clients ignore them,
-        # and they expose server-side internals - including fully rendered prompts
-        # from on_chat_model_start - to the caller. Remove this filter only if the
-        # endpoint is consumed by a trusted middle layer and you want the full
-        # event firehose (e.g. for the AG-UI Event Inspector).
-        if event.type == EventType.RAW:
-            continue
-        yield encoder.encode(event)
+    configurable = config.get("configurable", {})
+    user_id = configurable.get("user_id")
+    model = configurable.get("model", settings.DEFAULT_MODEL)
+    event_counts: dict[str, int] = {}
+    with observe_agent_run(
+        agent_id=agent_id,
+        protocol="agui",
+        run_id=input_data.run_id,
+        thread_id=input_data.thread_id,
+        user_id=str(user_id) if user_id is not None else None,
+        model=str(model),
+        input_data=input_data.model_dump(mode="json", by_alias=True),
+        metadata={"streaming": True, "transport": "sse"},
+    ) as observation:
+        try:
+            async for event in agent.run(input_data):
+                event_name = str(event.type)
+                event_counts[event_name] = event_counts.get(event_name, 0) + 1
+                # Don't forward RAW passthrough events. Standard AG-UI clients ignore them,
+                # and they expose server-side internals - including fully rendered prompts
+                # from on_chat_model_start - to the caller. Remove this filter only if the
+                # endpoint is consumed by a trusted middle layer and you want the full
+                # event firehose (e.g. for the AG-UI Event Inspector).
+                if event.type == EventType.RAW:
+                    continue
+                yield encoder.encode(event)
+            if observation is not None:
+                observation.update(output={"status": "completed", "event_counts": event_counts})
+        except Exception as e:
+            if observation is not None:
+                observation.update(
+                    output={"status": "error", "event_counts": event_counts},
+                    level="ERROR",
+                    status_message=str(e),
+                )
+            logger.exception("AG-UI run failed for agent %s: %s", agent_id, e)
+            raise
 
 
 @router.post("/run", operation_id="agui_run_default")

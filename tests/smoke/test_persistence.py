@@ -8,6 +8,7 @@ from client import AgentClient
 # this exact thread's checkpoints landed in the intended backend. Falls back to a
 # fixed id when the test is run on its own.
 THREAD_ID = os.environ.get("SMOKE_THREAD_ID", "smoke-test-persistence-thread")
+SERVICE_URL = os.environ.get("SMOKE_SERVICE_URL", "http://localhost:8080")
 
 
 @pytest.mark.docker
@@ -23,7 +24,7 @@ def test_checkpointer_persists_history():
     Uses the default agent (rather than pinning one) because /history always reads
     state through DEFAULT_AGENT regardless of which agent a thread was invoked with.
     """
-    client = AgentClient("http://localhost:8080")
+    client = AgentClient(SERVICE_URL)
 
     client.invoke("Tell me a joke?", thread_id=THREAD_ID, model="fake")
     client.invoke("Tell me another?", thread_id=THREAD_ID, model="fake")

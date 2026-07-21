@@ -61,7 +61,7 @@ docker compose watch
 1. **Asynchronous Design**: Utilizes async/await for efficient handling of concurrent requests.
 1. **Content Moderation**: Implements Safeguard for content moderation (requires Groq API key).
 1. **RAG Agent**: A basic RAG agent implementation using ChromaDB - see [docs](docs/RAG_Assistant.md).
-1. **Feedback Mechanism**: Includes a star-based feedback system integrated with LangSmith.
+1. **Feedback Mechanism**: Includes a star-based feedback system integrated with Langfuse trace scores.
 1. **Docker Support**: Includes Dockerfiles and a docker compose file for easy development and deployment.
 1. **Testing**: Includes robust unit and integration tests for the full repo.
 
@@ -123,6 +123,12 @@ For local development, we recommend using [docker compose watch](https://docs.do
    cp .env.example .env
    # Edit .env to add your API keys
    ```
+
+   The default database configuration uses the project's dedicated PostgreSQL
+   container on host port `15433`. Its named Docker volume persists both
+   LangGraph checkpoints and long-term Store records across service and database
+   container restarts. It is intentionally separate from the PostgreSQL instance
+   used by a self-hosted Langfuse stack.
 
 3. Build and launch the services in watch mode:
 
@@ -231,8 +237,9 @@ Contributions are welcome! Please feel free to submit a Pull Request. Currently 
 Some integrations aren't exercised by the unit suite or the default CI run because they
 need real infrastructure: the Postgres and MongoDB checkpointers, the AG-UI endpoint, and
 LangFuse tracing. `scripts/smoke_test.sh` spins up each dependency in Docker, runs the
-service against it, verifies the integration end-to-end (including a check that the
-intended backend was actually used, not a silent SQLite fallback), and tears it down.
+service against it, verifies the integration end-to-end (including checks that the
+intended backend was actually used and that PostgreSQL checkpoint and Store data
+survive a complete service restart), and tears it down.
 
 ```sh
 ./scripts/smoke_test.sh                 # default: postgres, mongo, agui
@@ -240,6 +247,11 @@ intended backend was actually used, not a silent SQLite fallback), and tears it 
 ./scripts/smoke_test.sh langfuse        # heavy: starts LangFuse's full self-host stack
 ./scripts/smoke_test.sh all             # everything, including langfuse
 ```
+
+Langfuse captures request/session/user attributes plus nested LangGraph nodes, model
+generations, tool calls, errors, and feedback scores. See
+[the Langfuse observability guide](docs/LANGFUSE.md) for self-hosted configuration and
+reuse-mode verification.
 
 These are opt-in confidence checks for a maintainer or agent — not part of CI. Run the
 target that matches what you changed rather than the whole set. The optional add-on

@@ -3,6 +3,7 @@ import re
 from enum import Enum
 
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 from core import get_model, settings
@@ -115,11 +116,13 @@ class Safeguard:
         result = self.model.invoke(compiled_messages)
         return parse_safeguard_output(str(result.content))
 
-    async def ainvoke(self, messages: list[AnyMessage]) -> SafeguardOutput:
+    async def ainvoke(
+        self, messages: list[AnyMessage], config: RunnableConfig | None = None
+    ) -> SafeguardOutput:
         if self.model is None:
             return SafeguardOutput(safety_assessment=SafetyAssessment.SAFE)
         compiled_messages = self._compile_messages(messages)
-        result = await self.model.ainvoke(compiled_messages)
+        result = await self.model.ainvoke(compiled_messages, config=config)
         return parse_safeguard_output(str(result.content))
 
 

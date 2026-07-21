@@ -10,6 +10,7 @@
 //   AGENT_URL   - base URL of the agent service (default: http://localhost:8080)
 //   AUTH_SECRET - bearer token, if the service has one configured
 //   THREAD_ID   - reuse a thread to continue a conversation (default: random)
+//   MODEL       - optional model passed via forwardedProps.configurable
 
 import { randomUUID } from "crypto";
 import { HttpAgent } from "@ag-ui/client";
@@ -18,6 +19,7 @@ const message = process.argv[2] ?? "Tell me a joke!";
 const agentId = process.argv[3] ?? "chatbot";
 const baseUrl = process.env.AGENT_URL ?? "http://localhost:8080";
 const threadId = process.env.THREAD_ID ?? randomUUID();
+const model = process.env.MODEL;
 
 const agent = new HttpAgent({
   url: `${baseUrl}/agui/${agentId}/run`,
@@ -36,7 +38,10 @@ const eventTypes = new Set();
 let printedPrefix = false;
 try {
   await agent.runAgent(
-    { runId: randomUUID() },
+    {
+      runId: randomUUID(),
+      forwardedProps: model ? { configurable: { model } } : {},
+    },
     {
       onEvent({ event }) {
         eventTypes.add(event.type);
