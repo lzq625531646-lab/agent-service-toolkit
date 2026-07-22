@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
@@ -369,6 +370,10 @@ async def message_generator(
                     # Without subgraphs: (stream_mode, event)
                     stream_mode, event = stream_event
                 new_messages = []
+
+                print(f"Received event: {stream_mode}")
+                print(json.dumps(jsonable_encoder(event), ensure_ascii=False, indent=4))
+
                 if stream_mode == "updates":
                     for node, updates in event.items():
                         # A simple approach to handle agent interrupts.

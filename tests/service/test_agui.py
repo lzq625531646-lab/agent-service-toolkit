@@ -1,6 +1,8 @@
 import json
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from ag_ui.core.events import Event
@@ -143,6 +145,40 @@ def test_agui_configurable_passthrough(mock_agui_agent, test_client) -> None:
     collect_events(test_client, "/agui/model-agent/run", body)
     assert captured_configurable.get("model") == "fake"
     assert captured_configurable.get("user_id") == "user-123"
+
+
+def test_agui_authenticated_user_owns_conversation(
+    mock_agui_agent, test_client, monkeypatch
+) -> None:
+    """Browser AG-UI runs use the authenticated account for memory and conversation indexing."""
+    from unittest.mock import AsyncMock
+
+    from auth import UserRecord, user_store
+    from service import app
+    from service.auth import AuthContext, get_auth_context
+
+    user = UserRecord(
+        id=uuid4(),
+        email="owner@example.com",
+        display_name="Owner",
+        password_hash="unused",
+        created_at=datetime.now(UTC),
+    )
+    ensure_conversation = AsyncMock()
+    monkeypatch.setattr(user_store, "ensure_conversation", ensure_conversation)
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(user=user, token="session")
+
+    body = run_input(forwardedProps={"configurable": {"model": "fake", "user_id": "attacker"}})
+    collect_events(test_client, "/agui/model-agent/run", body)
+
+    assert captured_configurable["user_id"] == str(user.id)
+    ensure_conversation.assert_awaited_once_with(
+        thread_id="test-thread",
+        user_id=user.id,
+        title="Hello",
+        agent_id="model-agent",
+        model="fake",
+    )
 
 
 def test_agui_configurable_reserved_keys(mock_agui_agent, test_client) -> None:

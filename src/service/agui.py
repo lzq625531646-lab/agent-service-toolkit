@@ -11,18 +11,20 @@ See docs/AGUI.md for usage, including how to connect a client.
 
 import logging
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Annotated, Any
 
 from ag_ui.core import EventType, RunAgentInput
 from ag_ui.encoder import EventEncoder
 from ag_ui_langgraph import LangGraphAgent
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 
 from agents import DEFAULT_AGENT, AgentGraph, get_agent
+from auth import ConversationAccessError, user_store
 from core import settings
 from core.observability import get_langfuse_handler, observe_agent_run
+from service.auth import AuthContext, get_auth_context
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,42 @@ def _base_config(input_data: RunAgentInput) -> RunnableConfig:
         callbacks.append(langfuse_handler)
 
     return RunnableConfig(configurable=dict(configurable), callbacks=callbacks)
+
+
+def _conversation_title(input_data: RunAgentInput) -> str:
+    for message in input_data.messages:
+        if message.role == "user" and isinstance(message.content, str):
+            compact = " ".join(message.content.split())
+            return compact[:80] or "New conversation"
+    return "New conversation"
+
+
+async def _prepare_config(
+    input_data: RunAgentInput,
+    auth: AuthContext,
+    agent_id: str,
+) -> RunnableConfig:
+    config = _base_config(input_data)
+    if auth.user is None:
+        return config
+
+    configurable = config.setdefault("configurable", {})
+    configurable["user_id"] = str(auth.user.id)
+    model = str(configurable.get("model", settings.DEFAULT_MODEL))
+    try:
+        await user_store.ensure_conversation(
+            thread_id=input_data.thread_id,
+            user_id=auth.user.id,
+            title=_conversation_title(input_data),
+            agent_id=agent_id,
+            model=model,
+        )
+    except ConversationAccessError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        ) from exc
+    return config
 
 
 async def _event_stream(
@@ -109,7 +147,10 @@ async def _event_stream(
 @router.post("/run", operation_id="agui_run_default")
 @router.post("/{agent_id}/run", operation_id="agui_run")
 async def agui_run(
-    input_data: RunAgentInput, request: Request, agent_id: str = DEFAULT_AGENT
+    input_data: RunAgentInput,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    agent_id: str = DEFAULT_AGENT,
 ) -> StreamingResponse:
     """
     Run an agent over the AG-UI protocol, streaming AG-UI events via SSE.
@@ -123,7 +164,7 @@ async def agui_run(
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    config = _base_config(input_data)
+    config = await _prepare_config(input_data, auth, agent_id)
     encoder = EventEncoder(accept=request.headers.get("accept", ""))
     return StreamingResponse(
         _event_stream(agent_id, graph, input_data, config, encoder),
